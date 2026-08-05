@@ -1,0 +1,8 @@
+{
+  "name": "SozoNodeProtocol",
+  "version": "0.1.0",
+  "description": "SOZO platform-neutral node protocol and typed messages",
+  "build": {
+    "flags": "-std=gnu++17"
+  }
+}

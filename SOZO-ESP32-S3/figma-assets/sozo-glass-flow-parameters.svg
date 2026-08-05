@@ -1,0 +1,135 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="1320" height="760" viewBox="0 0 1320 760">
+  <title>SOZO 空间灯光控制｜玻璃流光参数面板</title>
+  <desc>可导入 Figma 的分层 SVG。文字、卡片、色轮、滑条和状态提示均为独立图层。</desc>
+  <defs>
+    <linearGradient id="panelSurface" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#fbfefd"/>
+    </linearGradient>
+    <linearGradient id="cardSurface" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fbfefd"/>
+      <stop offset="1" stop-color="#f4faf8"/>
+    </linearGradient>
+    <radialGradient id="wheelGlow" cx="50%" cy="50%" r="70%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.98"/>
+      <stop offset="0.42" stop-color="#ffffff" stop-opacity="0.48"/>
+      <stop offset="0.78" stop-color="#15282c" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#15282c" stop-opacity="0.27"/>
+    </radialGradient>
+    <filter id="panelShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#214c50" flood-opacity="0.08"/>
+    </filter>
+    <filter id="cardShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#214c50" flood-opacity="0.06"/>
+    </filter>
+  </defs>
+
+  <g id="background" inkscape:label="背景">
+    <rect id="canvas-background" width="1320" height="760" fill="#eef7f5"/>
+  </g>
+
+  <g id="parameter-panel" inkscape:label="参数面板">
+    <rect id="panel-surface" x="0" y="0" width="1320" height="760" rx="24" fill="url(#panelSurface)" filter="url(#panelShadow)"/>
+
+    <g id="header" inkscape:label="标题区">
+      <text id="effect-parameters" x="24" y="32" fill="#4a8c8f" font-family="Inter, Microsoft YaHei, sans-serif" font-size="11" font-weight="600" letter-spacing="1.4">EFFECT PARAMETERS</text>
+      <text id="effect-title" x="24" y="66" fill="#123d5b" font-family="Inter, Microsoft YaHei, sans-serif" font-size="24" font-weight="700">玻璃流光</text>
+      <text id="effect-description" x="24" y="91" fill="#67888b" font-family="Inter, Microsoft YaHei, sans-serif" font-size="13">透明高光缓慢流动</text>
+    </g>
+
+    <g id="parameter-grid" inkscape:label="参数卡片网格">
+      <g id="primary-color-card" inkscape:label="参数卡片 / 主色">
+        <rect id="primary-card-surface" x="24" y="140" width="522" height="270" rx="15" fill="url(#cardSurface)" stroke="#d7e7e4"/>
+        <text id="primary-label" x="42" y="172" fill="#143e50" font-family="Inter, Microsoft YaHei, sans-serif" font-size="13" font-weight="600">主色</text>
+        <g id="primary-value-chip" inkscape:label="颜色值标签">
+          <rect x="454" y="155" width="74" height="27" rx="14" fill="#e3f4ef"/>
+          <text id="primary-hex" x="466" y="173" fill="#0d8582" font-family="Inter, Microsoft YaHei, sans-serif" font-size="11" font-weight="600">#E1C4C6</text>
+        </g>
+        <text id="primary-hint" x="230" y="203" fill="#6e898c" font-family="Inter, Microsoft YaHei, sans-serif" font-size="11">拖动选择颜色</text>
+        <g id="primary-color-wheel" inkscape:label="色轮 / 主色" transform="translate(283 296)">
+          <path id="primary-hue-0" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#ff316f"/>
+          <path id="primary-hue-1" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#ff6426" transform="rotate(30)"/>
+          <path id="primary-hue-2" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#ffcc19" transform="rotate(60)"/>
+          <path id="primary-hue-3" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#dfff2b" transform="rotate(90)"/>
+          <path id="primary-hue-4" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#5ee85b" transform="rotate(120)"/>
+          <path id="primary-hue-5" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#20d99d" transform="rotate(150)"/>
+          <path id="primary-hue-6" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#2ad9e7" transform="rotate(180)"/>
+          <path id="primary-hue-7" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#4d93ff" transform="rotate(210)"/>
+          <path id="primary-hue-8" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#5663ff" transform="rotate(240)"/>
+          <path id="primary-hue-9" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#a153ff" transform="rotate(270)"/>
+          <path id="primary-hue-10" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#e24dff" transform="rotate(300)"/>
+          <path id="primary-hue-11" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#ff55ae" transform="rotate(330)"/>
+          <circle id="primary-saturation-lightness" r="80" fill="url(#wheelGlow)"/>
+          <circle id="primary-inner-ring" r="56" fill="none" stroke="#ffffff" stroke-opacity="0.75"/>
+          <circle id="primary-marker-shadow" cx="-70" cy="64" r="15" fill="#233236" fill-opacity="0.18"/>
+          <circle id="primary-marker" cx="-70" cy="64" r="11" fill="#e1c4c6" stroke="#ffffff" stroke-width="3"/>
+        </g>
+      </g>
+
+      <g id="brightness-card" inkscape:label="参数卡片 / 亮度">
+        <rect id="brightness-card-surface" x="570" y="140" width="726" height="112" rx="15" fill="#fbfdfd" stroke="#d7e7e4"/>
+        <text id="brightness-label" x="588" y="172" fill="#143e50" font-family="Inter, Microsoft YaHei, sans-serif" font-size="13" font-weight="600">亮度</text>
+        <g id="brightness-value-chip" inkscape:label="亮度值">
+          <rect x="1242" y="155" width="36" height="27" rx="14" fill="#eef7f5"/>
+          <text id="brightness-value" x="1251" y="173" fill="#143e50" font-family="Inter, Microsoft YaHei, sans-serif" font-size="11" font-weight="600">100</text>
+        </g>
+        <g id="brightness-slider" inkscape:label="滑条 / 亮度">
+          <rect id="brightness-track" x="588" y="197" width="688" height="8" rx="4" fill="#3c4143"/>
+          <rect id="brightness-filled" x="588" y="197" width="270" height="8" rx="4" fill="#37ada8"/>
+          <circle id="brightness-knob" cx="858" cy="201" r="8" fill="#37ada8"/>
+          <text id="brightness-min" x="588" y="235" fill="#7b9698" font-family="Inter, Microsoft YaHei, sans-serif" font-size="10">0</text>
+          <text id="brightness-max" x="1259" y="235" fill="#7b9698" font-family="Inter, Microsoft YaHei, sans-serif" font-size="10">255</text>
+        </g>
+      </g>
+
+      <g id="flow-speed-card" inkscape:label="参数卡片 / 流动速度">
+        <rect id="speed-card-surface" x="24" y="434" width="630" height="110" rx="15" fill="#fbfdfd" stroke="#d7e7e4"/>
+        <text id="speed-label" x="42" y="466" fill="#143e50" font-family="Inter, Microsoft YaHei, sans-serif" font-size="13" font-weight="600">流动速度</text>
+        <g id="speed-value-chip" inkscape:label="速度值">
+          <rect x="575" y="449" width="61" height="27" rx="14" fill="#eef7f5"/>
+          <text id="speed-value" x="587" y="467" fill="#143e50" font-family="Inter, Microsoft YaHei, sans-serif" font-size="11" font-weight="600">44级</text>
+        </g>
+        <g id="flow-speed-slider" inkscape:label="滑条 / 流动速度">
+          <rect id="speed-track" x="42" y="495" width="594" height="8" rx="4" fill="#3c4143"/>
+          <rect id="speed-filled" x="42" y="495" width="260" height="8" rx="4" fill="#37ada8"/>
+          <circle id="speed-knob" cx="302" cy="499" r="8" fill="#37ada8"/>
+          <text id="speed-min" x="42" y="531" fill="#7b9698" font-family="Inter, Microsoft YaHei, sans-serif" font-size="10">1级</text>
+          <text id="speed-max" x="607" y="531" fill="#7b9698" font-family="Inter, Microsoft YaHei, sans-serif" font-size="10">100级</text>
+        </g>
+      </g>
+
+      <g id="secondary-color-card" inkscape:label="参数卡片 / 副色">
+        <rect id="secondary-card-surface" x="678" y="434" width="522" height="270" rx="15" fill="url(#cardSurface)" stroke="#d7e7e4"/>
+        <text id="secondary-label" x="696" y="466" fill="#143e50" font-family="Inter, Microsoft YaHei, sans-serif" font-size="13" font-weight="600">副色</text>
+        <g id="secondary-value-chip" inkscape:label="颜色值标签">
+          <rect x="1108" y="449" width="74" height="27" rx="14" fill="#e3f4ef"/>
+          <text id="secondary-hex" x="1120" y="467" fill="#0d8582" font-family="Inter, Microsoft YaHei, sans-serif" font-size="11" font-weight="600">#F0A85A</text>
+        </g>
+        <text id="secondary-hint" x="884" y="497" fill="#6e898c" font-family="Inter, Microsoft YaHei, sans-serif" font-size="11">拖动选择颜色</text>
+        <g id="secondary-color-wheel" inkscape:label="色轮 / 副色" transform="translate(937 590)">
+          <path id="secondary-hue-0" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#ff316f"/>
+          <path id="secondary-hue-1" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#ff6426" transform="rotate(30)"/>
+          <path id="secondary-hue-2" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#ffcc19" transform="rotate(60)"/>
+          <path id="secondary-hue-3" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#dfff2b" transform="rotate(90)"/>
+          <path id="secondary-hue-4" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#5ee85b" transform="rotate(120)"/>
+          <path id="secondary-hue-5" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#20d99d" transform="rotate(150)"/>
+          <path id="secondary-hue-6" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#2ad9e7" transform="rotate(180)"/>
+          <path id="secondary-hue-7" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#4d93ff" transform="rotate(210)"/>
+          <path id="secondary-hue-8" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#5663ff" transform="rotate(240)"/>
+          <path id="secondary-hue-9" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#a153ff" transform="rotate(270)"/>
+          <path id="secondary-hue-10" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#e24dff" transform="rotate(300)"/>
+          <path id="secondary-hue-11" d="M0 0 L0 -80 A80 80 0 0 1 40 -69.282 Z" fill="#ff55ae" transform="rotate(330)"/>
+          <circle id="secondary-saturation-lightness" r="80" fill="url(#wheelGlow)"/>
+          <circle id="secondary-inner-ring" r="56" fill="none" stroke="#ffffff" stroke-opacity="0.75"/>
+          <circle id="secondary-marker-shadow" cx="44" cy="48" r="15" fill="#233236" fill-opacity="0.18"/>
+          <circle id="secondary-marker" cx="44" cy="48" r="11" fill="#f0a85a" stroke="#ffffff" stroke-width="3"/>
+        </g>
+      </g>
+    </g>
+
+    <g id="sync-status" inkscape:label="同步状态">
+      <text id="status-note" x="24" y="725" fill="#6a8f91" font-family="Inter, Microsoft YaHei, sans-serif" font-size="11">✦ 设备状态优先；参数会自动保存。</text>
+      <text id="status-synced" x="24" y="748" fill="#168b88" font-family="Inter, Microsoft YaHei, sans-serif" font-size="12" font-weight="600">参数已同步到设备</text>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,11 @@
+{
+  "name": "SozoBusCore",
+  "version": "0.1.0",
+  "description": "SOZO fixed-capacity publish/subscribe and async request core",
+  "dependencies": {
+    "SozoNodeProtocol": "*"
+  },
+  "build": {
+    "flags": "-std=gnu++17"
+  }
+}
