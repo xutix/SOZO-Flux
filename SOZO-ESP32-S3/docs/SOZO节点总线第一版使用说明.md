@@ -21,7 +21,7 @@ C3 第一版灯带参数暂时为：
 
 ## 2. 第一版已经实现的能力
 
-- 主设备继续通过路由器提供 `http://sozo-esp32.local/` 网页。
+- 主设备继续通过路由器提供 `http://sozo-flux.local/` 网页。
 - 主设备作为 BLE Central，C3 作为 BLE Peripheral。
 - C3 在本地渲染灯效；主设备只发送场景参数，不连续发送每颗灯珠的 RGB 数据。
 - 普通灯效同步完整参数、主色、副色、亮度和动画时间基准。
@@ -98,8 +98,8 @@ C3 第一版灯带参数暂时为：
 
 ## 6. 验收入口
 
-- 主网页：`http://sozo-esp32.local/`
-- 节点状态：`http://sozo-esp32.local/api/nodes`
+- 主网页：`http://sozo-flux.local/`
+- 节点状态：`http://sozo-flux.local/api/nodes`
 
 未按 BOOT 开启 C3 配对窗口时，节点接口应显示 `searching` 且节点列表为空。完成配对后应显示 `ready`，列表中出现 C3 NodeId、灯珠数量、绑定状态、最后心跳、最后场景版本和剩余内存。
 
