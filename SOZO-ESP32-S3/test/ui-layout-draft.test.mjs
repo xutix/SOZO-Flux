@@ -118,7 +118,7 @@ function loadPageUi(serverStatus, nodeResponse = { ok: true, nodes: [] }) {
   const fetchCalls = [];
   const script = match[1].replace(
     'loadStatus();setInterval(()=>loadStatus(false),5000);',
-    'globalThis.__ui={setLayoutProfile,loadStatus,loadNodes,getLayoutProfile:()=>layoutProfile,setState:value=>state=value,setSelected:value=>selected=value,getState:()=>state,getFetchCalls:()=>fetchCalls,getSelectedExtensionId:()=>selectedNodeId,getSelectedExtensionNode:selectedExtensionNode,renderEffects,chooseEffect,renderParameters,colorControl,extensionColorControl,getParameterClass:typeof parameterLayoutClass===\'function\'?parameterLayoutClass:null,getParameterPlan:typeof parameterPlan===\'function\'?parameterPlan:null,getParameterGridClass:typeof parameterGridClass===\'function\'?parameterGridClass:null,getParameterColumns:typeof parameterColumns===\'function\'?parameterColumns:null,getParameterGridItems:typeof parameterGridItems===\'function\'?parameterGridItems:null};',
+    'globalThis.__ui={setLayoutProfile,loadStatus,loadNodes,openNodePairing,getLayoutProfile:()=>layoutProfile,setState:value=>state=value,setSelected:value=>selected=value,getState:()=>state,getFetchCalls:()=>fetchCalls,getSelectedExtensionId:()=>selectedNodeId,getSelectedExtensionNode:selectedExtensionNode,renderEffects,chooseEffect,renderParameters,colorControl,extensionColorControl,getParameterClass:typeof parameterLayoutClass===\'function\'?parameterLayoutClass:null,getParameterPlan:typeof parameterPlan===\'function\'?parameterPlan:null,getParameterGridClass:typeof parameterGridClass===\'function\'?parameterGridClass:null,getParameterColumns:typeof parameterColumns===\'function\'?parameterColumns:null,getParameterGridItems:typeof parameterGridItems===\'function\'?parameterGridItems:null};',
   );
   const sandbox = {
     URLSearchParams,
@@ -385,6 +385,19 @@ test('offers selectable extension lights with separate follow and independent co
     assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
       `missing extension-device interaction: ${required}`);
   }
+});
+
+test('opens a sixty-second add-device window from the device page', async () => {
+  const response = { ok: true, nodes: [], knownCount: 0, onlineCount: 0,
+    capacity: 4, pairingWindowOpen: false, pairingRemainingMs: 0 };
+  const { document, ui } = loadPageUi(statusWith('continuous'), response);
+
+  await ui.openNodePairing();
+
+  const request = ui.getFetchCalls().find(call => call.url === '/api/nodes/pairing');
+  assert.ok(request);
+  assert.equal(request.options.method, 'POST');
+  assert.match(document.getElementById('extensionNodeMessage').textContent, /60/);
 });
 
 test('offers one local LED-count editor for each online light extension', () => {

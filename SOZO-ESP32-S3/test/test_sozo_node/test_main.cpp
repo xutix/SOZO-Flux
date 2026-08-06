@@ -1,6 +1,8 @@
 #include <SceneMessageMapper.h>
 #include <NodeRegistry.h>
 #include <NodeCoordinator.h>
+#include <NodeFleetCoordinator.h>
+#include <NodeFleetTransport.h>
 #include <NodeTransport.h>
 #include <BleLinkStateMachine.h>
 #include <BleOperationSupervisor.h>
@@ -56,6 +58,50 @@ class FakeNodeTransport final : public sozo::NodeTransport {
   sozo::node::Envelope inbound{};
   sozo::node::Envelope sent[8]{};
   size_t sentCount{0};
+};
+
+class FakeNodeFleetTransport final : public sozo::NodeFleetTransport {
+ public:
+  FakeNodeFleetTransport() {
+    links[0].remoteId = 0xC3000001U;
+    links[1].remoteId = 0xC3000002U;
+    for (FakeNodeTransport &link : links) {
+      link.remoteCapabilities.bound = true;
+      link.remoteCapabilities.capabilityBits = sozo::node::capabilityMask(
+          sozo::node::Capability::LightOutput);
+    }
+  }
+
+  bool begin() override {
+    began = true;
+    return true;
+  }
+  void tick(uint32_t) override {}
+  size_t capacity() const override { return 2U; }
+  sozo::NodeTransport *linkAt(size_t index) override {
+    return index < capacity() ? &links[index] : nullptr;
+  }
+  const sozo::NodeTransport *linkAt(size_t index) const override {
+    return index < capacity() ? &links[index] : nullptr;
+  }
+  bool releaseLink(size_t index) override {
+    if (index >= capacity()) return false;
+    links[index].isReady = false;
+    return true;
+  }
+  bool openPairingWindow(uint32_t, uint32_t) override {
+    pairingOpen = true;
+    return true;
+  }
+  bool pairingWindowOpen(uint32_t) const override { return pairingOpen; }
+  uint32_t pairingRemainingMs(uint32_t) const override {
+    return pairingOpen ? 60000U : 0U;
+  }
+  bool scanning() const override { return pairingOpen; }
+
+  FakeNodeTransport links[2]{};
+  bool began{false};
+  bool pairingOpen{false};
 };
 
 void test_maps_every_runtime_effect_parameter() {
@@ -668,9 +714,82 @@ void test_coordinator_forwards_led_count_and_refreshes_confirmed_value() {
   CHECK_EQ(58U, record->status.ledCount);
 }
 
+void test_fleet_sends_the_main_scene_to_every_ready_light_node() {
+  FakeNodeFleetTransport transport;
+  sozo::NodeFleetCoordinator fleet(transport);
+  CHECK_TRUE(fleet.begin());
+
+  const sozo::PersistedLightingState state =
+      sozo::makeDefaultPersistedLightingState();
+  const sozo::LightingSnapshot runtime{state.mode, state.layout.activeCount,
+                                       false, -1};
+  fleet.tick(100U, state, runtime, {});
+
+  CHECK_TRUE(transport.began);
+  CHECK_EQ(2U, fleet.onlineCount());
+  CHECK_EQ(2U, fleet.registry().size());
+  CHECK_EQ(1U, transport.links[0].sentCount);
+  CHECK_EQ(1U, transport.links[1].sentCount);
+  CHECK_EQ(transport.links[0].remoteId,
+           transport.links[0].sent[0].targetNodeId);
+  CHECK_EQ(transport.links[1].remoteId,
+           transport.links[1].sent[0].targetNodeId);
+  CHECK_EQ(sozo::node::MessageType::SceneSnapshot,
+           transport.links[0].sent[0].messageType);
+  CHECK_EQ(sozo::node::MessageType::SceneSnapshot,
+           transport.links[1].sent[0].messageType);
+}
+
+void test_fleet_only_binds_an_unknown_node_during_explicit_pairing() {
+  FakeNodeFleetTransport transport;
+  transport.links[0].remoteCapabilities.bound = false;
+  transport.links[1].isReady = false;
+  sozo::NodeFleetCoordinator fleet(transport);
+  CHECK_TRUE(fleet.begin());
+
+  const sozo::PersistedLightingState state =
+      sozo::makeDefaultPersistedLightingState();
+  const sozo::LightingSnapshot runtime{state.mode, state.layout.activeCount,
+                                       false, -1};
+  fleet.tick(100U, state, runtime, {});
+  CHECK_EQ(0U, transport.links[0].sentCount);
+  CHECK_EQ(0U, fleet.registry().size());
+
+  CHECK_TRUE(fleet.openPairingWindow(101U));
+  transport.links[0].isReady = true;
+  ++transport.links[0].generation;
+  fleet.tick(102U, state, runtime, {});
+  CHECK_EQ(1U, transport.links[0].sentCount);
+  CHECK_EQ(sozo::node::MessageType::BindRequest,
+           transport.links[0].sent[0].messageType);
+  CHECK_EQ(1U, fleet.registry().size());
+}
+
+void test_fleet_routes_a_device_command_only_to_the_selected_node() {
+  FakeNodeFleetTransport transport;
+  sozo::NodeFleetCoordinator fleet(transport);
+  CHECK_TRUE(fleet.begin());
+
+  const sozo::PersistedLightingState state =
+      sozo::makeDefaultPersistedLightingState();
+  const sozo::LightingSnapshot runtime{state.mode, state.layout.activeCount,
+                                       false, -1};
+  fleet.tick(100U, state, runtime, {});
+
+  CHECK_TRUE(fleet.requestNodeControlMode(
+      transport.links[1].remoteId,
+      sozo::node::NodeControlMode::Independent, 101U));
+  CHECK_EQ(1U, transport.links[0].sentCount);
+  CHECK_EQ(2U, transport.links[1].sentCount);
+  CHECK_EQ(transport.links[1].remoteId,
+           transport.links[1].sent[1].targetNodeId);
+  CHECK_EQ(sozo::node::MessageType::ControlModeRequest,
+           transport.links[1].sent[1].messageType);
+}
+
 }  // namespace
 
-int main(int, char **) {
+int runNodeTests() {
   test_maps_every_runtime_effect_parameter();
   test_scene_does_not_grow_with_physical_led_count();
   test_audio_features_are_clamped_and_scaled();
@@ -692,5 +811,15 @@ int main(int, char **) {
   test_coordinator_routes_independent_scene_and_mode_to_selected_light_node();
   test_independent_scene_requires_node_confirmation_of_independent_mode();
   test_coordinator_forwards_led_count_and_refreshes_confirmed_value();
+  test_fleet_sends_the_main_scene_to_every_ready_light_node();
+  test_fleet_only_binds_an_unknown_node_during_explicit_pairing();
+  test_fleet_routes_a_device_command_only_to_the_selected_node();
   return sozo::test::finish("scene mapper tests");
 }
+
+#if defined(ARDUINO)
+void setup() { runNodeTests(); }
+void loop() {}
+#else
+int main(int, char **) { return runNodeTests(); }
+#endif

@@ -30,6 +30,23 @@ test('provides device-scoped endpoints for control mode and independent scenes',
   assert.match(source, /requestIndependentScene/);
 });
 
+test('/api/nodes exposes fleet capacity and an explicit pairing window', () => {
+  for (const field of [
+    'knownCount',
+    'onlineCount',
+    'capacity',
+    'scanning',
+    'pairingWindowOpen',
+    'pairingRemainingMs',
+  ]) {
+    assert.match(source, new RegExp(`\\\\"${field}\\\\"`),
+      `missing fleet field: ${field}`);
+  }
+  assert.match(source, /"\/api\/nodes\/pairing"/);
+  assert.match(source, /handleOpenNodePairing/);
+  assert.match(source, /openPairingWindow/);
+});
+
 test('independent scene request applies the selected effect to the scene state', () => {
   const start = source.indexOf('bool WebApi::parseLightingRequest');
   const end = source.indexOf('void WebApi::handleSetLighting', start);

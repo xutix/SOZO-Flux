@@ -11,7 +11,11 @@ constexpr uint32_t kAudioIntervalMs = 33U;
 }  // namespace
 
 NodeCoordinator::NodeCoordinator(NodeTransport &transport)
-    : transport_(transport) {}
+    : transport_(transport), registry_(ownedRegistry_) {}
+
+NodeCoordinator::NodeCoordinator(NodeTransport &transport,
+                                 NodeRegistry &registry)
+    : transport_(transport), registry_(registry) {}
 
 bool NodeCoordinator::begin() { return transport_.begin(); }
 
@@ -29,6 +33,11 @@ void NodeCoordinator::tick(const uint32_t nowMs,
   if (!transport_.ready()) return;
   handleReadyGeneration(nowMs);
   if (!bindingReady_) {
+    if (!transport_.capabilities().bound && !bindingAllowed_) return;
+    if (activeNodeId_ != 0U && registry_.find(activeNodeId_) == nullptr) {
+      registry_.registerCapabilities(activeNodeId_, transport_.capabilities(),
+                                     nowMs);
+    }
     if (!bindingRequested_) requestBinding(nowMs);
     return;
   }
@@ -50,6 +59,10 @@ NodeTransportState NodeCoordinator::transportState() const {
 }
 bool NodeCoordinator::nodeReady() const {
   return transport_.ready() && bindingReady_;
+}
+node::NodeId NodeCoordinator::activeNodeId() const { return activeNodeId_; }
+void NodeCoordinator::setBindingAllowed(const bool allowed) {
+  bindingAllowed_ = allowed;
 }
 const char *NodeCoordinator::operationName() const {
   return transport_.operationName();
@@ -333,10 +346,11 @@ void NodeCoordinator::handleReadyGeneration(const uint32_t nowMs) {
   bindingRequested_ = false;
   pendingBindCorrelation_ = 0;
   const node::CapabilitiesPayload &capabilities = transport_.capabilities();
-  registry_.registerCapabilities(transport_.remoteNodeId(), capabilities,
-                                 nowMs);
   activeNodeId_ = transport_.remoteNodeId();
   bindingReady_ = capabilities.bound;
+  if (bindingReady_ || bindingAllowed_) {
+    registry_.registerCapabilities(activeNodeId_, capabilities, nowMs);
+  }
 }
 
 void NodeCoordinator::handleInbound(const uint32_t nowMs) {

@@ -6,7 +6,7 @@
 #include <AudioAnalyzer.h>
 #include <CommandRouter.h>
 #include <NetworkManager.h>
-#include <NodeCoordinator.h>
+#include <NodeFleetCoordinator.h>
 
 namespace sozo {
 
@@ -16,7 +16,8 @@ class WebApi {
   using PageBuilder = String (*)();
 
   WebApi(CommandRouter &commands, NetworkManager &network,
-         AudioAnalyzer &audio, NodeCoordinator &nodes, PageBuilder spatialPage,
+         AudioAnalyzer &audio, NodeFleetCoordinator &nodes,
+         PageBuilder spatialPage,
          RestartCallback restart);
 
   void begin();
@@ -28,6 +29,7 @@ class WebApi {
   void handleRoot();
   void handleApiStatus();
   void handleGetNodes();
+  void handleOpenNodePairing();
   void handleWiFiScan();
   void handleWiFiSave();
   void handleWiFiReset();
@@ -60,7 +62,7 @@ class WebApi {
   CommandRouter &commands_;
   NetworkManager &network_;
   AudioAnalyzer &audio_;
-  NodeCoordinator &nodes_;
+  NodeFleetCoordinator &nodes_;
   PageBuilder spatialPage_;
   RestartCallback restart_;
 };

@@ -4,11 +4,11 @@
 #include <SpatialLightCore.h>
 
 #include <AudioAnalyzer.h>
-#include <BleCentralAdapter.h>
+#include <BleFleetAdapter.h>
 #include <CommandRouter.h>
 #include <LightingController.h>
 #include <NetworkManager.h>
-#include <NodeCoordinator.h>
+#include <NodeFleetCoordinator.h>
 #include <SerialConsole.h>
 #include <SettingsStore.h>
 #include <S3LightingOutput.h>
@@ -39,8 +39,8 @@ sozo::s3::S3LightingOutput lightingOutput(spatial_light::kMaxLedCount,
 sozo::LightingController lightingController(lightingOutput);
 sozo::AudioAnalyzer audioAnalyzer;
 sozo::CommandRouter commandRouter(lightingController, settingsStore);
-sozo::BleCentralAdapter bleNodeTransport;
-sozo::NodeCoordinator nodeCoordinator(bleNodeTransport);
+sozo::BleFleetAdapter bleNodeTransport;
+sozo::NodeFleetCoordinator nodeCoordinator(bleNodeTransport);
 sozo::SerialConsole serialConsole(Serial, commandRouter);
 Adafruit_NeoPixel statusLed(kStatusLedCount, kStatusLedPin,
                             NEO_GRB + NEO_KHZ800);
@@ -173,8 +173,9 @@ void printSystemInfo() {
                 lightingController.state().layout.activeCount,
                 spatial_light::kMaxLedCount);
   Serial.printf("Onboard status WS2812: GPIO%u (disabled)\n", kStatusLedPin);
-  Serial.printf("SOZO Flux node bus: %s\n",
-                nodeCoordinator.nodeReady() ? "NODE READY" : "SCANNING");
+  Serial.printf("SOZO Flux node bus: %u/%u nodes online\n",
+                static_cast<unsigned int>(nodeCoordinator.onlineCount()),
+                static_cast<unsigned int>(nodeCoordinator.capacity()));
   Serial.printf("PlatformIO OTA: %s\n", otaAvailable ? "READY" : "DISABLED");
   if (sozo::isProvisioningNetworkState(network.state)) {
     Serial.println(

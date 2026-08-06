@@ -185,7 +185,7 @@ document.getElementById('setupForm').addEventListener('submit',async event=>{eve
 namespace sozo {
 
 WebApi::WebApi(CommandRouter &commands, NetworkManager &network,
-               AudioAnalyzer &audio, NodeCoordinator &nodes,
+               AudioAnalyzer &audio, NodeFleetCoordinator &nodes,
                const PageBuilder spatialPage,
                const RestartCallback restart)
     : server_(80),
@@ -207,6 +207,8 @@ void WebApi::registerRoutes() {
   server_.on("/", HTTP_GET, [this]() { handleRoot(); });
   server_.on("/api/status", HTTP_GET, [this]() { handleApiStatus(); });
   server_.on("/api/nodes", HTTP_GET, [this]() { handleGetNodes(); });
+  server_.on("/api/nodes/pairing", HTTP_POST,
+             [this]() { handleOpenNodePairing(); });
   server_.on("/api/wifi/scan", HTTP_GET, [this]() { handleWiFiScan(); });
   server_.on("/api/wifi/save", HTTP_POST, [this]() { handleWiFiSave(); });
   server_.on("/api/wifi/reset", HTTP_GET, [this]() { handleWiFiReset(); });
@@ -891,7 +893,7 @@ void WebApi::handleGetNodes() {
   };
 
   String json;
-  json.reserve(900);
+  json.reserve(1100);
   json += F("{\"ok\":true,\"bleState\":\"");
   json += transportStateName(nodes_.transportState());
   json += F("\",\"ready\":");
@@ -902,6 +904,18 @@ void WebApi::handleGetNodes() {
   json += nodes_.workerBusy() ? F("true") : F("false");
   json += F(",\"bleTimeouts\":");
   json += nodes_.timeoutCount();
+  json += F(",\"knownCount\":");
+  json += nodes_.registry().size();
+  json += F(",\"onlineCount\":");
+  json += nodes_.onlineCount();
+  json += F(",\"capacity\":");
+  json += nodes_.capacity();
+  json += F(",\"scanning\":");
+  json += nodes_.scanning() ? F("true") : F("false");
+  json += F(",\"pairingWindowOpen\":");
+  json += nodes_.pairingWindowOpen(millis()) ? F("true") : F("false");
+  json += F(",\"pairingRemainingMs\":");
+  json += nodes_.pairingRemainingMs(millis());
   json += F(",\"nodes\":[");
   bool first = true;
   const NodeRegistry &registry = nodes_.registry();
@@ -942,6 +956,20 @@ void WebApi::handleGetNodes() {
     json += '}';
   }
   json += F("]}");
+  server_.send(200, "application/json; charset=utf-8", json);
+}
+
+void WebApi::handleOpenNodePairing() {
+  const uint32_t nowMs = millis();
+  if (!nodes_.openPairingWindow(nowMs)) {
+    sendApiResult(false, "No free node connection slot");
+    return;
+  }
+  String json;
+  json.reserve(96);
+  json += F("{\"ok\":true,\"pairingWindowOpen\":true,\"durationMs\":");
+  json += NodeFleetCoordinator::kDefaultPairingWindowMs;
+  json += '}';
   server_.send(200, "application/json; charset=utf-8", json);
 }
 

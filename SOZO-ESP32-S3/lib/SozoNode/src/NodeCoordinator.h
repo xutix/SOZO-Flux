@@ -10,6 +10,7 @@ namespace sozo {
 class NodeCoordinator {
  public:
   explicit NodeCoordinator(NodeTransport &transport);
+  NodeCoordinator(NodeTransport &transport, NodeRegistry &registry);
 
   bool begin();
   void tick(uint32_t nowMs, const PersistedLightingState &lightingState,
@@ -19,6 +20,8 @@ class NodeCoordinator {
   const NodeRegistry &registry() const;
   NodeTransportState transportState() const;
   bool nodeReady() const;
+  node::NodeId activeNodeId() const;
+  void setBindingAllowed(bool allowed);
   const char *operationName() const;
   bool workerBusy() const;
   uint32_t timeoutCount() const;
@@ -62,7 +65,8 @@ class NodeCoordinator {
   bool isAudioEffect(EffectMode mode) const;
 
   NodeTransport &transport_;
-  NodeRegistry registry_{};
+  NodeRegistry ownedRegistry_{};
+  NodeRegistry &registry_;
   node::SozoBus bus_{};
   node::SceneSnapshotPayload currentScene_{};
   uint32_t sceneRevision_{0};
@@ -87,6 +91,7 @@ class NodeCoordinator {
   bool bindingReady_{false};
   bool bindingRequested_{false};
   bool transportWasReady_{false};
+  bool bindingAllowed_{true};
 };
 
 }  // namespace sozo

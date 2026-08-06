@@ -37,6 +37,7 @@ TARGETS = {
         "sources": [
             "SOZO-ESP32-S3/test/test_sozo_node/test_main.cpp",
             "SOZO-ESP32-S3/lib/SozoNode/src/NodeCoordinator.cpp",
+            "SOZO-ESP32-S3/lib/SozoNode/src/NodeFleetCoordinator.cpp",
             "SOZO-ESP32-S3/lib/SozoNode/src/NodeRegistry.cpp",
             "SOZO-ESP32-S3/lib/SozoNode/src/SceneMessageMapper.cpp",
             "SOZO-ESP32-S3/lib/SozoTransport/src/BleLinkStateMachine.cpp",

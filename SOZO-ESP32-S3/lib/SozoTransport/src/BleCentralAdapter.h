@@ -15,7 +15,6 @@
 namespace sozo {
 
 class BleCentralAdapter final : public NodeTransport,
-                                private NimBLEScanCallbacks,
                                 private NimBLEClientCallbacks {
  public:
   static constexpr size_t kInboundQueueCapacity = 8;
@@ -36,6 +35,10 @@ class BleCentralAdapter final : public NodeTransport,
   uint32_t timeoutCount() const override;
 
   BleOperationStage operationStage() const;
+  bool connect(uint64_t address, uint8_t addressType, uint32_t nowMs);
+  bool assigned() const;
+  uint64_t peerAddress() const;
+  bool release();
 
  private:
   enum class WorkerCommandType : uint8_t { Connect = 0 };
@@ -65,8 +68,6 @@ class BleCentralAdapter final : public NodeTransport,
     node::CapabilitiesPayload capabilities{};
   };
 
-  void onResult(const NimBLEAdvertisedDevice *device) override;
-  void onScanEnd(const NimBLEScanResults &results, int reason) override;
   void onConnect(NimBLEClient *client) override;
   void onDisconnect(NimBLEClient *client, int reason) override;
   void onAuthenticationComplete(NimBLEConnInfo &connection) override;
@@ -90,7 +91,6 @@ class BleCentralAdapter final : public NodeTransport,
   void observeWorkerStage(uint32_t nowMs);
   void abortTimedOutOperation(uint32_t nowMs);
   void launchConnect(const Candidate &candidate, uint32_t nowMs);
-  void startScan();
   void enterBackoff(uint32_t nowMs, BleLinkEvent event);
   void clearConnectionState();
   void clearWorkerConnectionPointers();
@@ -111,18 +111,17 @@ class BleCentralAdapter final : public NodeTransport,
   BleOperationSupervisor operationSupervisor_{};
   BleAttemptGate attemptGate_{};
   BleOutboundMailbox outbound_{};
-  NimBLEScan *scan_{nullptr};
   NimBLEClient *client_{nullptr};
   NimBLERemoteCharacteristic *controlCharacteristic_{nullptr};
   NimBLERemoteCharacteristic *eventCharacteristic_{nullptr};
   NimBLERemoteCharacteristic *infoCharacteristic_{nullptr};
-  QueueHandle_t candidateQueue_{nullptr};
   QueueHandle_t workerCommandQueue_{nullptr};
   QueueHandle_t workerEventQueue_{nullptr};
   QueueHandle_t inboundQueue_{nullptr};
   TaskHandle_t workerTask_{nullptr};
   node::CapabilitiesPayload capabilities_{};
   node::NodeId remoteNodeId_{0};
+  Candidate assignedCandidate_{};
   uint32_t retryAtMs_{0};
   uint32_t readyGeneration_{0};
   uint32_t droppedPackets_{0};
@@ -130,7 +129,7 @@ class BleCentralAdapter final : public NodeTransport,
   uint32_t connectedAttemptId_{0};
   BleOperationStage operationStage_{BleOperationStage::Idle};
   BleOperationStage observedOperationStage_{BleOperationStage::Idle};
-  bool scanEnded_{false};
+  bool assigned_{false};
   bool initialized_{false};
   bool authenticated_{false};
   bool workerBusy_{false};
