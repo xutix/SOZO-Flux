@@ -10,5 +10,7 @@
 *.elf
 *.map
 compile_commands.json
+__pycache__/
+*.pyc
 docs/superpowers/
 **/docs/superpowers/

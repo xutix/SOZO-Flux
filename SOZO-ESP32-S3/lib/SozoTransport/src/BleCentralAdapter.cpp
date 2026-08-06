@@ -44,7 +44,7 @@ bool BleCentralAdapter::begin() {
     return false;
   }
 
-  if (!NimBLEDevice::init("SOZO-Coordinator")) return false;
+  if (!NimBLEDevice::init("SOZO-Flux-Coordinator")) return false;
   NimBLEDevice::setMTU(ble::kPreferredMtu);
   NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
   NimBLEDevice::setSecurityAuth(true, false, true);

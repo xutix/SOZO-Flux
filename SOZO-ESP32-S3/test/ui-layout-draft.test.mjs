@@ -85,7 +85,7 @@ function findElement(root, predicate) {
 function statusWith(profile) {
   return {
     wifiState: 'connected',
-    mdns: 'sozo-esp32.local',
+    mdns: 'sozo-flux.local',
     effect: 'BREATH',
     micAvailable: true,
     startupColor: '#3278dc',

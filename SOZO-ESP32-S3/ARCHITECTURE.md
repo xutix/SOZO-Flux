@@ -1,4 +1,4 @@
-# SOZO ESP32-S3 协调器架构入口
+# SOZO Flux Gateway S3 架构入口
 
 本工程是 SOZO 空间的协调器：维护权威场景、接收控制命令、管理节点生命周期，并通过适配器连接网页、串口、Wi-Fi、BLE Central、主灯带、NVS 与板载音频。
 

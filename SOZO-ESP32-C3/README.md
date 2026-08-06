@@ -1,6 +1,6 @@
-# SOZO ESP32-C3 扩展节点
+# SOZO Flux Node C3
 
-这是 SOZO 空间灯光系统的 ESP32-C3 SuperMini 副设备固件。它通过 BLE 与 ESP32-S3 主控连接，驱动自己的本地灯带，并执行与主控相同的灯效参数。
+这是 SOZO Flux 的 ESP32-C3 SuperMini 扩展节点固件。它通过 BLE 与 Gateway S3 连接，驱动自己的本地灯带，并执行共享灯效参数。
 
 ## 当前硬件
 

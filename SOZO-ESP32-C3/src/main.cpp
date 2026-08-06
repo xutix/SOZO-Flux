@@ -8,6 +8,7 @@
 #include <NodeControlStore.h>
 #include <NodeHardwareConfig.h>
 #include <NodeLedCountStore.h>
+#include <SozoVersion.h>
 
 namespace {
 
@@ -43,13 +44,13 @@ sozo::node::NodeId makeNodeId() {
 void reportNodeEvent(const sozo::c3::C3NodeEvent event) {
   switch (event) {
     case sozo::c3::C3NodeEvent::PairingOpened:
-      Serial.println("[SOZO-C3] Pairing window open for 60 seconds.");
+      Serial.println("[SOZO Flux C3] Pairing window open for 60 seconds.");
       break;
     case sozo::c3::C3NodeEvent::PairingClosed:
-      Serial.println("[SOZO-C3] Pairing window closed.");
+      Serial.println("[SOZO Flux C3] Pairing window closed.");
       break;
     case sozo::c3::C3NodeEvent::RestartRequested:
-      Serial.println("[SOZO-C3] Pairing reset complete; restarting.");
+      Serial.println("[SOZO Flux C3] Pairing reset complete; restarting.");
       delay(200);
       ESP.restart();
       break;
@@ -68,16 +69,19 @@ void setup() {
   const bool ready = nodeApp.begin(makeNodeId(), millis());
   const sozo::c3::NodeBinding &binding = nodeApp.binding();
 
-  Serial.printf("[SOZO-C3] Local light ready: GPIO%u, default=%u, max=%u pixels\n",
+  Serial.printf("[SOZO Flux C3] Firmware=%s Platform=%s Protocol=%u\n",
+                sozo::version::kNodeC3, sozo::version::kPlatform,
+                sozo::node::kProtocolVersion);
+  Serial.printf("[SOZO Flux C3] Local light ready: GPIO%u, default=%u, max=%u pixels\n",
                 sozo::c3::kLedPin, sozo::c3::kDefaultLedCount,
                 sozo::c3::kMaxLedCount);
-  Serial.printf("[SOZO-C3] Node=%08lX BLE=%s binding=%s\n",
+  Serial.printf("[SOZO Flux C3] Node=%08lX BLE=%s binding=%s\n",
                 static_cast<unsigned long>(nodeApp.nodeId()),
                 ready ? "READY" : "FAILED", binding.bound ? "BOUND" : "UNBOUND");
   if (!binding.bound) {
-    Serial.println("[SOZO-C3] Hold BOOT for 1.5 seconds to pair.");
+    Serial.println("[SOZO Flux C3] Hold BOOT for 1.5 seconds to pair.");
   } else {
-    Serial.println("[SOZO-C3] Hold BOOT for 8 seconds to reset pairing.");
+    Serial.println("[SOZO Flux C3] Hold BOOT for 8 seconds to reset pairing.");
   }
 }
 

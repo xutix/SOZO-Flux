@@ -1,0 +1,60 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository:
+    name: Repository Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check release versions
+        run: python tools/check_versions.py
+      - name: Check text format
+        run: python tools/check_text_format.py
+      - name: Run JavaScript contracts
+        run: node --test test/*.test.mjs SOZO-ESP32-S3/test/*.test.mjs
+
+  native:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Common Native Tests
+            project: SOZO-Common
+            environment: native
+          - name: Gateway Node Logic Tests
+            project: SOZO-ESP32-S3
+            environment: native-node
+          - name: C3 Node Runtime Tests
+            project: SOZO-ESP32-C3
+            environment: native-node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PlatformIO
+        run: python -m pip install platformio==6.1.19
+      - name: Run native tests
+        run: platformio test --project-dir "${{ matrix.project }}" --environment "${{ matrix.environment }}"
