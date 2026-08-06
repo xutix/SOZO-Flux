@@ -8,9 +8,9 @@
 namespace sozo {
 namespace {
 
-constexpr char kProvisioningApSsid[] = "SOZO-SETUP";
+constexpr char kProvisioningApSsid[] = "SOZO-FLUX-SETUP";
 constexpr char kProvisioningApPassword[] = "12345678";
-constexpr char kMdnsHostname[] = "sozo-esp32";
+constexpr char kMdnsHostname[] = "sozo-flux";
 constexpr uint32_t kConnectTimeoutMs = 30000;
 
 }  // namespace

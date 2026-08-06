@@ -1,6 +1,6 @@
-# SOZO-Common
+# SOZO Flux Common
 
-SOZO 主设备与扩展节点共用的轻量协议和总线库。
+SOZO Flux Gateway 与扩展节点共用的平台无关领域、灯效、协议和总线库。
 
 当前包含：
 

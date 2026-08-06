@@ -1,4 +1,4 @@
-# SOZO Ubiquitous Language
+# SOZO Flux Ubiquitous Language
 
 - **主灯（Main Light）**：运行当前 SOZO 灯光固件、拥有灯带状态和持久化配置的 ESP32-S3。
 - **控制节点（Control Node）**：自制的按钮、旋钮、滑杆或传感器 ESP32 设备；它不是主灯，也不拥有灯效状态。

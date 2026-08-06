@@ -13,14 +13,15 @@
 #include <SettingsStore.h>
 #include <S3LightingOutput.h>
 #include <SozoDomain.h>
+#include <SozoVersion.h>
 #include <WebApi.h>
 
 #include "SpatialLightPage.h"
 
 namespace {
 
-constexpr char kProjectName[] = "SOZO ESP32-S3 Wi-Fi Music Light";
-constexpr char kOtaHostname[] = "sozo-esp32";
+constexpr char kProjectName[] = "SOZO Flux Gateway S3";
+constexpr char kOtaHostname[] = "sozo-flux";
 #ifndef SOZO_OTA_PASSWORD
 #define SOZO_OTA_PASSWORD ""
 #endif
@@ -96,7 +97,7 @@ void initOta() {
 
   ArduinoOTA.setHostname(kOtaHostname);
   if (kOtaPassword[0] != '\0') ArduinoOTA.setPassword(kOtaPassword);
-  // NetworkManager already owns the sozo-esp32.local mDNS responder.
+  // NetworkManager already owns the sozo-flux.local mDNS responder.
   ArduinoOTA.setMdnsEnabled(false);
   ArduinoOTA.onStart([]() {
     lastOtaProgressPercent = 255;
@@ -150,6 +151,9 @@ void printSystemInfo() {
   Serial.println();
   Serial.println(F("================================================"));
   Serial.printf("Project: %s\n", kProjectName);
+  Serial.printf("Firmware: %s | Platform: %s | Protocol: %u\n",
+                sozo::version::kGatewayS3, sozo::version::kPlatform,
+                sozo::node::kProtocolVersion);
   Serial.printf("Wi-Fi state: %s | Mode: %s | SSID: %s | IP: %s\n",
                 sozo::networkStateName(network.state),
                 sozo::isProvisioningNetworkState(network.state) ? "AP" : "STA",
@@ -169,11 +173,12 @@ void printSystemInfo() {
                 lightingController.state().layout.activeCount,
                 spatial_light::kMaxLedCount);
   Serial.printf("Onboard status WS2812: GPIO%u (disabled)\n", kStatusLedPin);
-  Serial.printf("SOZO BLE node bus: %s\n",
+  Serial.printf("SOZO Flux node bus: %s\n",
                 nodeCoordinator.nodeReady() ? "NODE READY" : "SCANNING");
   Serial.printf("PlatformIO OTA: %s\n", otaAvailable ? "READY" : "DISABLED");
   if (sozo::isProvisioningNetworkState(network.state)) {
-    Serial.println(F("Connect to SOZO-SETUP and open http://192.168.4.1."));
+    Serial.println(
+        F("Connect to SOZO-FLUX-SETUP and open http://192.168.4.1."));
   } else if (network.state == sozo::NetworkState::Connected) {
     if (network.mdnsAvailable) {
       Serial.printf("Open http://%s.local (fallback: http://%s).\n",
@@ -275,7 +280,7 @@ void setup() {
                 wifiAvailable ? "SUCCESS" : "FAILED");
   initOta();
   const bool nodeBusAvailable = nodeCoordinator.begin();
-  Serial.printf("[BOOT] SOZO BLE node bus: %s\n",
+  Serial.printf("[BOOT] SOZO Flux node bus: %s\n",
                 nodeBusAvailable ? "SUCCESS" : "FAILED");
   webApi.begin();
   Serial.println(F("[BOOT] HTTP WebServer started on port 80."));

@@ -1,0 +1,7 @@
+{
+  "name": "SozoVersion",
+  "version": "0.1.0-alpha",
+  "description": "SOZO Flux platform and firmware version constants",
+  "frameworks": "*",
+  "platforms": "*"
+}

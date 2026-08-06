@@ -5,7 +5,7 @@
 #include <BleLinkStateMachine.h>
 #include <BleOperationSupervisor.h>
 #include <BleOutboundMailbox.h>
-#include <TestHarness.h>
+#include "../../../SOZO-Common/test/TestHarness.h"
 
 namespace {
 

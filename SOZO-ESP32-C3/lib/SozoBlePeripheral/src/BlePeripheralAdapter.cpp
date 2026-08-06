@@ -27,7 +27,7 @@ bool BlePeripheralAdapter::begin(
   capabilities_.bound = bound_;
 
   char deviceName[24]{};
-  snprintf(deviceName, sizeof(deviceName), "SOZO-C3-%04lX",
+  snprintf(deviceName, sizeof(deviceName), "SOZO-FLUX-C3-%04lX",
            static_cast<unsigned long>(nodeId_ & 0xFFFFU));
   if (!NimBLEDevice::init(deviceName)) return false;
   NimBLEDevice::setMTU(ble::kPreferredMtu);
