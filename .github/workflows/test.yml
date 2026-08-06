@@ -41,20 +41,26 @@ jobs:
       matrix:
         include:
           - name: Common Native Tests
+            runner: platformio
             project: SOZO-Common
             environment: native
           - name: Gateway Node Logic Tests
-            project: SOZO-ESP32-S3
-            environment: native-node
+            runner: host
+            target: gateway-node
           - name: C3 Node Runtime Tests
-            project: SOZO-ESP32-C3
-            environment: native-node
+            runner: host
+            target: c3-node
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install PlatformIO
+        if: matrix.runner == 'platformio'
         run: python -m pip install platformio==6.1.19
-      - name: Run native tests
+      - name: Run Common native tests
+        if: matrix.runner == 'platformio'
         run: platformio test --project-dir "${{ matrix.project }}" --environment "${{ matrix.environment }}"
+      - name: Run component native tests
+        if: matrix.runner == 'host'
+        run: python tools/run_native_tests.py "${{ matrix.target }}"

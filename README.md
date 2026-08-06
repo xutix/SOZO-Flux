@@ -62,8 +62,8 @@ build_flags =
 
 ```powershell
 platformio test --project-dir SOZO-Common --environment native
-platformio test --project-dir SOZO-ESP32-S3 --environment native-node
-platformio test --project-dir SOZO-ESP32-C3 --environment native-node
+python tools/run_native_tests.py gateway-node
+python tools/run_native_tests.py c3-node
 node --test test/*.test.mjs SOZO-ESP32-S3/test/*.test.mjs
 python tools/check_versions.py
 python tools/check_text_format.py
