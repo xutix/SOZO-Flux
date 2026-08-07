@@ -1,6 +1,7 @@
 #pragma once
 
 #include <NodeRegistry.h>
+#include <NodeFirmwareTransfer.h>
 #include <NodeTransport.h>
 #include <SceneMessageMapper.h>
 #include <SozoBus.h>
@@ -33,6 +34,10 @@ class NodeCoordinator {
                                uint32_t nowMs);
   bool requestNodeLedCount(node::NodeId nodeId, uint16_t ledCount,
                            uint32_t nowMs);
+  bool requestNodeFirmwareUpdate(node::NodeId nodeId, const uint8_t *image,
+                                 size_t imageSize, const uint8_t sha256[32],
+                                 uint32_t nowMs);
+  const NodeFirmwareTransferStatus &firmwareUpdateStatus() const;
 
  private:
   static void onBindResponse(node::RequestOutcome outcome,
@@ -87,6 +92,8 @@ class NodeCoordinator {
   uint32_t lastAudioSentMs_{0};
   uint32_t lastTickMs_{0};
   node::NodeId activeNodeId_{0};
+  NodeFirmwareTransfer firmwareTransfer_;
+  uint32_t firmwareReadyGeneration_{0U};
   bool hasScene_{false};
   bool bindingReady_{false};
   bool bindingRequested_{false};

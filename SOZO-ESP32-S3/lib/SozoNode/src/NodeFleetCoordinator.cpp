@@ -45,6 +45,14 @@ void NodeFleetCoordinator::tick(
       }
     }
   }
+  if (firmwareNodeId_ != 0U) {
+    NodeCoordinator *firmwareSession = sessionFor(firmwareNodeId_);
+    if (firmwareSession == nullptr ||
+        firmwareSession->firmwareUpdateStatus().state ==
+            NodeFirmwareTransferState::Idle) {
+      firmwareNodeId_ = 0U;
+    }
+  }
 }
 
 const NodeRegistry &NodeFleetCoordinator::registry() const { return registry_; }
@@ -138,6 +146,35 @@ bool NodeFleetCoordinator::requestNodeLedCount(const node::NodeId nodeId,
   NodeCoordinator *session = sessionFor(nodeId);
   return session != nullptr &&
          session->requestNodeLedCount(nodeId, ledCount, nowMs);
+}
+
+bool NodeFleetCoordinator::requestNodeFirmwareUpdate(
+    const node::NodeId nodeId, const uint8_t *image, const size_t imageSize,
+    const uint8_t sha256[32], const uint32_t nowMs) {
+  if (firmwareNodeId_ != 0U) {
+    NodeCoordinator *current = sessionFor(firmwareNodeId_);
+    if (current != nullptr &&
+        current->firmwareUpdateStatus().state !=
+            NodeFirmwareTransferState::Failed &&
+        current->firmwareUpdateStatus().state !=
+            NodeFirmwareTransferState::Idle) {
+      return false;
+    }
+    firmwareNodeId_ = 0U;
+  }
+  NodeCoordinator *session = sessionFor(nodeId);
+  if (session == nullptr || !session->requestNodeFirmwareUpdate(
+                                nodeId, image, imageSize, sha256, nowMs)) {
+    return false;
+  }
+  firmwareNodeId_ = nodeId;
+  return true;
+}
+
+NodeFirmwareTransferStatus NodeFleetCoordinator::firmwareUpdateStatus() const {
+  NodeFirmwareTransferStatus status{};
+  NodeCoordinator *session = sessionFor(firmwareNodeId_);
+  return session == nullptr ? status : session->firmwareUpdateStatus();
 }
 
 NodeCoordinator *NodeFleetCoordinator::sessionFor(

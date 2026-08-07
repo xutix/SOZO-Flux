@@ -43,6 +43,10 @@ class NodeFleetCoordinator {
                                uint32_t nowMs);
   bool requestNodeLedCount(node::NodeId nodeId, uint16_t ledCount,
                            uint32_t nowMs);
+  bool requestNodeFirmwareUpdate(node::NodeId nodeId, const uint8_t *image,
+                                 size_t imageSize, const uint8_t sha256[32],
+                                 uint32_t nowMs);
+  NodeFirmwareTransferStatus firmwareUpdateStatus() const;
 
  private:
   NodeCoordinator *sessionFor(node::NodeId nodeId) const;
@@ -51,6 +55,7 @@ class NodeFleetCoordinator {
   NodeRegistry registry_{};
   NodeCoordinator *sessions_[kMaxConcurrentNodes]{};
   size_t sessionCount_{0};
+  node::NodeId firmwareNodeId_{0U};
 };
 
 }  // namespace sozo

@@ -11,11 +11,13 @@ constexpr uint32_t kAudioIntervalMs = 33U;
 }  // namespace
 
 NodeCoordinator::NodeCoordinator(NodeTransport &transport)
-    : transport_(transport), registry_(ownedRegistry_) {}
+    : transport_(transport), registry_(ownedRegistry_),
+      firmwareTransfer_(transport, 3000U, 3U) {}
 
 NodeCoordinator::NodeCoordinator(NodeTransport &transport,
                                  NodeRegistry &registry)
-    : transport_(transport), registry_(registry) {}
+    : transport_(transport), registry_(registry),
+      firmwareTransfer_(transport, 3000U, 3U) {}
 
 bool NodeCoordinator::begin() { return transport_.begin(); }
 
@@ -29,6 +31,14 @@ void NodeCoordinator::tick(const uint32_t nowMs,
   observeTransportLifecycle(nowMs);
   handleInbound(nowMs);
   bus_.expireRequests(nowMs);
+
+  firmwareTransfer_.tick(nowMs);
+  if (firmwareTransfer_.active() ||
+      (firmwareTransfer_.status().state ==
+           NodeFirmwareTransferState::Succeeded &&
+       transport_.readyGeneration() == firmwareReadyGeneration_)) {
+    return;
+  }
 
   if (!transport_.ready()) return;
   handleReadyGeneration(nowMs);
@@ -178,6 +188,26 @@ bool NodeCoordinator::requestNodeLedCount(const node::NodeId nodeId,
   return true;
 }
 
+bool NodeCoordinator::requestNodeFirmwareUpdate(
+    const node::NodeId nodeId, const uint8_t *image, const size_t imageSize,
+    const uint8_t sha256[32], const uint32_t nowMs) {
+  const NodeRecord *record = registry_.find(nodeId);
+  if (!isAvailableLightNode(nodeId) || record == nullptr ||
+      (record->capabilities.capabilityBits &
+       node::capabilityMask(node::Capability::FirmwareUpdate)) == 0U) {
+    return false;
+  }
+  if (!firmwareTransfer_.start(nodeId, image, imageSize, sha256, nowMs)) {
+    return false;
+  }
+  firmwareReadyGeneration_ = transport_.readyGeneration();
+  return true;
+}
+
+const NodeFirmwareTransferStatus &NodeCoordinator::firmwareUpdateStatus() const {
+  return firmwareTransfer_.status();
+}
+
 void NodeCoordinator::onBindResponse(const node::RequestOutcome outcome,
                                      const node::Envelope *response,
                                      void *context) {
@@ -305,6 +335,8 @@ void NodeCoordinator::observeTransportLifecycle(const uint32_t nowMs) {
   }
   if (!transportWasReady_) return;
 
+  firmwareTransfer_.onDisconnected();
+
   if (activeNodeId_ != 0) registry_.markOffline(activeNodeId_, nowMs);
   if (pendingBindCorrelation_ != 0) bus_.cancelResponse(pendingBindCorrelation_);
   if (pendingSceneCorrelation_ != 0) {
@@ -342,6 +374,12 @@ void NodeCoordinator::handleReadyGeneration(const uint32_t nowMs) {
   const uint32_t generation = transport_.readyGeneration();
   if (generation == handledReadyGeneration_) return;
   handledReadyGeneration_ = generation;
+  if (firmwareTransfer_.status().state ==
+          NodeFirmwareTransferState::Succeeded &&
+      generation != firmwareReadyGeneration_) {
+    firmwareTransfer_.reset();
+    firmwareReadyGeneration_ = 0U;
+  }
   sceneSentGeneration_ = 0;
   bindingRequested_ = false;
   pendingBindCorrelation_ = 0;
@@ -356,6 +394,7 @@ void NodeCoordinator::handleReadyGeneration(const uint32_t nowMs) {
 void NodeCoordinator::handleInbound(const uint32_t nowMs) {
   node::Envelope envelope{};
   while (transport_.popInbound(envelope)) {
+    if (firmwareTransfer_.handleInbound(envelope)) continue;
     if (bus_.resolveResponse(envelope)) continue;
     if (envelope.messageType == node::MessageType::StatusSnapshot) {
       node::StatusSnapshotPayload status{};

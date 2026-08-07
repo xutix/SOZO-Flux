@@ -2,6 +2,8 @@
 
 这是 SOZO Flux 的 ESP32-C3 SuperMini 扩展节点固件。它通过 BLE 与 Gateway S3 连接，驱动自己的本地灯带，并执行共享灯效参数。
 
+从 `0.2.0-alpha` 起，C3 支持通过已绑定且加密的 BLE 连接更新固件。旧版本需先通过 USB 烧录一次支持 OTA 的引导固件；之后可在 Gateway 网页的设备页选择对应 C3 和 `firmware.bin` 完成更新。传输中断、写入失败或 SHA-256 校验失败时不会启用不完整固件。
+
 ## 当前硬件
 
 - 开发板：ESP32-C3 SuperMini（PlatformIO 目标：`esp32-c3-devkitm-1`）

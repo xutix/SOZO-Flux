@@ -133,6 +133,9 @@ function loadPageUi(serverStatus, nodeResponse = { ok: true, nodes: [] }) {
         ok: true,
         json: async () => {
           if (requestUrl.includes('/api/nodes')) return structuredClone(nodeResponse);
+          if (requestUrl === '/api/node/firmware') {
+            return { ok: true, state: 'idle', nodeId: '00000000', progress: 0, error: 'none' };
+          }
           if (requestUrl === '/api/lighting') {
             const body = new URLSearchParams(options.body);
             const nextStatus = structuredClone(serverStatus);
@@ -411,6 +414,21 @@ test('offers one local LED-count editor for each online light extension', () => 
   ]) {
     assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
       `missing C3 LED count editor: ${required}`);
+  }
+});
+
+test('offers firmware selection and progress only through the C3 OTA endpoint', () => {
+  const source = readFileSync(new URL('../src/SpatialLightPage.cpp', import.meta.url), 'utf8');
+  for (const required of [
+    'extensionFirmwareFile',
+    'uploadExtensionFirmware',
+    'pollExtensionFirmware',
+    '/api/node/firmware',
+    '已绑定且加密的 BLE',
+    '首次需要通过 USB 烧录',
+  ]) {
+    assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      `missing C3 firmware update interaction: ${required}`);
   }
 });
 

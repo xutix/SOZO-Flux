@@ -394,4 +394,104 @@ CodecResult readLedCountRequest(const Envelope &envelope,
                                 : CodecResult::Ok;
 }
 
+CodecResult writeFirmwareBegin(Envelope &envelope,
+                               const FirmwareBeginPayload &payload) {
+  if (payload.imageSize == 0U) return CodecResult::InvalidPayload;
+  envelope.messageType = MessageType::FirmwareBegin;
+  PayloadWriter writer(envelope);
+  writer.u32(payload.imageSize);
+  for (const uint8_t value : payload.sha256) writer.u8(value);
+  return CodecResult::Ok;
+}
+
+CodecResult readFirmwareBegin(const Envelope &envelope,
+                              FirmwareBeginPayload &payload) {
+  const CodecResult result = validate(envelope, MessageType::FirmwareBegin,
+                                      kFirmwareBeginWireBytes);
+  if (result != CodecResult::Ok) return result;
+  payload = FirmwareBeginPayload{};
+  PayloadReader reader(envelope);
+  payload.imageSize = reader.u32();
+  for (uint8_t &value : payload.sha256) value = reader.u8();
+  return payload.imageSize == 0U ? CodecResult::InvalidPayload
+                                 : CodecResult::Ok;
+}
+
+CodecResult writeFirmwareChunk(Envelope &envelope,
+                               const FirmwareChunkPayload &payload) {
+  if (payload.dataLength == 0U ||
+      payload.dataLength > kFirmwareChunkDataBytes) {
+    return CodecResult::InvalidPayload;
+  }
+  envelope.messageType = MessageType::FirmwareChunk;
+  PayloadWriter writer(envelope);
+  writer.u32(payload.offset);
+  for (uint16_t index = 0; index < payload.dataLength; ++index) {
+    writer.u8(payload.data[index]);
+  }
+  return CodecResult::Ok;
+}
+
+CodecResult readFirmwareChunk(const Envelope &envelope,
+                              FirmwareChunkPayload &payload) {
+  if (envelope.messageType != MessageType::FirmwareChunk ||
+      envelope.payloadLength <= kFirmwareChunkHeaderWireBytes ||
+      envelope.payloadLength > kMaxPayloadBytes) {
+    return CodecResult::InvalidPayload;
+  }
+  payload = FirmwareChunkPayload{};
+  PayloadReader reader(envelope);
+  payload.offset = reader.u32();
+  payload.dataLength = static_cast<uint16_t>(
+      envelope.payloadLength - kFirmwareChunkHeaderWireBytes);
+  for (uint16_t index = 0; index < payload.dataLength; ++index) {
+    payload.data[index] = reader.u8();
+  }
+  return CodecResult::Ok;
+}
+
+CodecResult writeFirmwareEnd(Envelope &envelope) {
+  envelope.messageType = MessageType::FirmwareEnd;
+  envelope.payloadLength = 0U;
+  return CodecResult::Ok;
+}
+
+CodecResult readFirmwareEnd(const Envelope &envelope) {
+  return validate(envelope, MessageType::FirmwareEnd, 0U);
+}
+
+CodecResult writeFirmwareStatus(Envelope &envelope,
+                                const FirmwareStatusPayload &payload) {
+  envelope.messageType = MessageType::FirmwareStatus;
+  envelope.flags = kFlagIsResponse |
+                   (payload.error == FirmwareUpdateError::None
+                        ? 0U
+                        : kFlagIsError);
+  PayloadWriter writer(envelope);
+  writer.u8(static_cast<uint8_t>(payload.state));
+  writer.u32(payload.nextOffset);
+  writer.u32(payload.imageSize);
+  writer.u16(static_cast<uint16_t>(payload.error));
+  return CodecResult::Ok;
+}
+
+CodecResult readFirmwareStatus(const Envelope &envelope,
+                               FirmwareStatusPayload &payload) {
+  const CodecResult result = validate(envelope, MessageType::FirmwareStatus,
+                                      kFirmwareStatusWireBytes);
+  if (result != CodecResult::Ok) return result;
+  PayloadReader reader(envelope);
+  const auto state = static_cast<FirmwareUpdateState>(reader.u8());
+  if (state > FirmwareUpdateState::Failed) return CodecResult::InvalidPayload;
+  payload = FirmwareStatusPayload{};
+  payload.state = state;
+  payload.nextOffset = reader.u32();
+  payload.imageSize = reader.u32();
+  payload.error = static_cast<FirmwareUpdateError>(reader.u16());
+  if (payload.error > FirmwareUpdateError::Busy) {
+    return CodecResult::InvalidPayload;
+  }
+  return CodecResult::Ok;
+}
+
 }  // namespace sozo::node

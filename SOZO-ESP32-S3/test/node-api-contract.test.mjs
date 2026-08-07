@@ -64,3 +64,14 @@ test('provides one device-scoped endpoint for the C3 LED count', () => {
   assert.match(source, /handleSetNodeLedCount/);
   assert.match(source, /requestNodeLedCount/);
 });
+
+test('provides one encrypted BLE firmware workflow for OTA-capable C3 nodes', () => {
+  assert.match(source, /"\/api\/node\/firmware"/);
+  assert.match(source, /handleNodeFirmwareUploadData/);
+  assert.match(source, /handleGetNodeFirmwareStatus/);
+  assert.match(source, /requestNodeFirmwareUpdate/);
+  for (const field of ['otaCapable', 'firmware', 'confirmedBytes', 'progress']) {
+    assert.match(source, new RegExp(`\\\\"${field}\\\\"`),
+      `missing firmware field: ${field}`);
+  }
+});

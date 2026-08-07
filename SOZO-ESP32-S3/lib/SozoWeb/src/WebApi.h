@@ -39,6 +39,9 @@ class WebApi {
   void handleSetNodeMode();
   void handleSetNodeLighting();
   void handleSetNodeLedCount();
+  void handleNodeFirmwareUpload();
+  void handleNodeFirmwareUploadData();
+  void handleGetNodeFirmwareStatus();
   void handleSetMode();
   void handleSetColor();
   void handleSetBrightness();
@@ -65,6 +68,12 @@ class WebApi {
   NodeFleetCoordinator &nodes_;
   PageBuilder spatialPage_;
   RestartCallback restart_;
+  uint8_t *nodeFirmwareImage_{nullptr};
+  size_t nodeFirmwareSize_{0U};
+  size_t nodeFirmwareReceived_{0U};
+  node::NodeId nodeFirmwareTarget_{0U};
+  String nodeFirmwareUploadError_{};
+  bool nodeFirmwareUploadComplete_{false};
 };
 
 }  // namespace sozo

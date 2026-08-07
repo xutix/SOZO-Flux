@@ -4,6 +4,7 @@
 #include <C3LightingHardware.h>
 #include <C3NodeApplication.h>
 #include <C3PlatformHardware.h>
+#include <Esp32FirmwareWriter.h>
 #include <NodeBindingStore.h>
 #include <NodeControlStore.h>
 #include <NodeHardwareConfig.h>
@@ -23,11 +24,15 @@ sozo::c3::BlePeripheralAdapter bleAdapter(pairingWindow);
 sozo::c3::NodeBindingStore bindingStore;
 sozo::c3::NodeControlStore controlStore;
 sozo::c3::NodeLedCountStore ledCountStore;
+sozo::c3::Esp32FirmwareWriter firmwareWriter;
+sozo::c3::NodeFirmwareReceiver firmwareReceiver(firmwareWriter, 0x140000U,
+                                                 15000U);
 const sozo::c3::C3NodeProfile nodeProfile{sozo::c3::kDefaultLedCount,
                                            sozo::c3::kMaxLedCount, 1U};
 sozo::c3::C3NodeApplication nodeApp(lightingSink, bootButton, diagnostics,
                                      pairingWindow, bleAdapter, bindingStore,
-                                     controlStore, ledCountStore, nodeProfile);
+                                     controlStore, ledCountStore, nodeProfile,
+                                     &firmwareReceiver);
 
 sozo::node::NodeId makeNodeId() {
   const uint64_t chipId = ESP.getEfuseMac();
@@ -52,6 +57,11 @@ void reportNodeEvent(const sozo::c3::C3NodeEvent event) {
     case sozo::c3::C3NodeEvent::RestartRequested:
       Serial.println("[SOZO Flux C3] Pairing reset complete; restarting.");
       delay(200);
+      ESP.restart();
+      break;
+    case sozo::c3::C3NodeEvent::FirmwareRestartRequested:
+      Serial.println("[SOZO Flux C3] Firmware verified; restarting.");
+      delay(300);
       ESP.restart();
       break;
     case sozo::c3::C3NodeEvent::None:

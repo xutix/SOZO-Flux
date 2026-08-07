@@ -2,12 +2,76 @@
 
 #include <SpatialLightCore.h>
 
+#include <esp_heap_caps.h>
+#include <mbedtls/sha256.h>
+
 namespace {
 
 using sozo::EffectMode;
 using sozo::PersistedLightingState;
 
 constexpr uint16_t kMaxLedCount = spatial_light::kMaxLedCount;
+constexpr size_t kMaxC3FirmwareBytes = 0x140000U;
+constexpr uint16_t kEsp32C3ImageChipId = 5U;
+
+bool validC3FirmwareImage(const uint8_t *image, const size_t imageSize) {
+  if (image == nullptr || imageSize < 24U ||
+      imageSize > kMaxC3FirmwareBytes || image[0] != 0xE9U) {
+    return false;
+  }
+  const uint16_t chipId = static_cast<uint16_t>(image[12]) |
+                          (static_cast<uint16_t>(image[13]) << 8U);
+  return chipId == kEsp32C3ImageChipId;
+}
+
+const char *firmwareTransferStateName(
+    const sozo::NodeFirmwareTransferState state) {
+  switch (state) {
+    case sozo::NodeFirmwareTransferState::Starting:
+      return "starting";
+    case sozo::NodeFirmwareTransferState::Sending:
+      return "sending";
+    case sozo::NodeFirmwareTransferState::Finalizing:
+      return "verifying";
+    case sozo::NodeFirmwareTransferState::Succeeded:
+      return "restarting";
+    case sozo::NodeFirmwareTransferState::Failed:
+      return "failed";
+    case sozo::NodeFirmwareTransferState::Idle:
+    default:
+      return "idle";
+  }
+}
+
+const char *firmwareErrorName(const sozo::node::FirmwareUpdateError error) {
+  switch (error) {
+    case sozo::node::FirmwareUpdateError::InvalidImage:
+      return "invalid_image";
+    case sozo::node::FirmwareUpdateError::ImageTooLarge:
+      return "image_too_large";
+    case sozo::node::FirmwareUpdateError::WriteFailed:
+      return "write_failed";
+    case sozo::node::FirmwareUpdateError::HashMismatch:
+      return "hash_mismatch";
+    case sozo::node::FirmwareUpdateError::UnexpectedOffset:
+      return "unexpected_offset";
+    case sozo::node::FirmwareUpdateError::Timeout:
+      return "timeout";
+    case sozo::node::FirmwareUpdateError::LinkLost:
+      return "link_lost";
+    case sozo::node::FirmwareUpdateError::Unsupported:
+      return "unsupported";
+    case sozo::node::FirmwareUpdateError::Busy:
+      return "busy";
+    case sozo::node::FirmwareUpdateError::Unauthorized:
+      return "unauthorized";
+    case sozo::node::FirmwareUpdateError::NotStarted:
+      return "not_started";
+    case sozo::node::FirmwareUpdateError::None:
+    default:
+      return "none";
+  }
+}
 
 const char *modeName(const EffectMode mode) {
   switch (mode) {
@@ -201,7 +265,18 @@ void WebApi::begin() {
   server_.begin();
 }
 
-void WebApi::handleClient() { server_.handleClient(); }
+void WebApi::handleClient() {
+  server_.handleClient();
+  if (nodeFirmwareImage_ != nullptr && nodeFirmwareUploadComplete_ &&
+      nodes_.firmwareUpdateStatus().state == NodeFirmwareTransferState::Idle) {
+    heap_caps_free(nodeFirmwareImage_);
+    nodeFirmwareImage_ = nullptr;
+    nodeFirmwareSize_ = 0U;
+    nodeFirmwareReceived_ = 0U;
+    nodeFirmwareTarget_ = 0U;
+    nodeFirmwareUploadComplete_ = false;
+  }
+}
 
 void WebApi::registerRoutes() {
   server_.on("/", HTTP_GET, [this]() { handleRoot(); });
@@ -221,6 +296,11 @@ void WebApi::registerRoutes() {
              [this]() { handleSetNodeLighting(); });
   server_.on("/api/node/led-count", HTTP_POST,
              [this]() { handleSetNodeLedCount(); });
+  server_.on("/api/node/firmware", HTTP_GET,
+             [this]() { handleGetNodeFirmwareStatus(); });
+  server_.on("/api/node/firmware", HTTP_POST,
+             [this]() { handleNodeFirmwareUpload(); },
+             [this]() { handleNodeFirmwareUploadData(); });
   server_.on("/api/mode", HTTP_GET, [this]() { handleSetMode(); });
   server_.on("/api/color", HTTP_GET, [this]() { handleSetColor(); });
   server_.on("/api/brightness", HTTP_GET,
@@ -761,6 +841,151 @@ void WebApi::handleSetNodeLedCount() {
   server_.send(202, "application/json; charset=utf-8", json);
 }
 
+void WebApi::handleNodeFirmwareUploadData() {
+  HTTPUpload &upload = server_.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    nodeFirmwareUploadError_ = "";
+    nodeFirmwareUploadComplete_ = false;
+    nodeFirmwareReceived_ = 0U;
+    nodeFirmwareSize_ = 0U;
+    nodeFirmwareTarget_ = 0U;
+
+    const NodeFirmwareTransferState transferState =
+        nodes_.firmwareUpdateStatus().state;
+    if (transferState == NodeFirmwareTransferState::Starting ||
+        transferState == NodeFirmwareTransferState::Sending ||
+        transferState == NodeFirmwareTransferState::Finalizing ||
+        transferState == NodeFirmwareTransferState::Succeeded) {
+      nodeFirmwareUploadError_ = "another C3 firmware update is active";
+      return;
+    }
+    if (nodeFirmwareImage_ != nullptr) {
+      heap_caps_free(nodeFirmwareImage_);
+      nodeFirmwareImage_ = nullptr;
+    }
+    if (!server_.hasArg("id") ||
+        !parseNodeId(server_.arg("id"), nodeFirmwareTarget_)) {
+      nodeFirmwareUploadError_ = "valid target node id is required";
+      return;
+    }
+    const NodeRecord *record = nodes_.registry().find(nodeFirmwareTarget_);
+    if (record == nullptr ||
+        record->connectionState != NodeConnectionState::Ready ||
+        !record->capabilities.bound ||
+        (record->capabilities.capabilityBits &
+         node::capabilityMask(node::Capability::FirmwareUpdate)) == 0U) {
+      nodeFirmwareUploadError_ =
+          "target C3 must be online, bound, and OTA-capable";
+      return;
+    }
+    if (!psramFound()) {
+      nodeFirmwareUploadError_ = "S3 PSRAM is unavailable";
+      return;
+    }
+    nodeFirmwareImage_ = static_cast<uint8_t *>(heap_caps_malloc(
+        kMaxC3FirmwareBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (nodeFirmwareImage_ == nullptr) {
+      nodeFirmwareUploadError_ = "not enough S3 PSRAM for firmware image";
+    }
+    return;
+  }
+
+  if (upload.status == UPLOAD_FILE_WRITE) {
+    if (!nodeFirmwareUploadError_.isEmpty()) return;
+    if (nodeFirmwareImage_ == nullptr || upload.currentSize == 0U ||
+        nodeFirmwareReceived_ + upload.currentSize > kMaxC3FirmwareBytes) {
+      nodeFirmwareUploadError_ = "firmware image is too large";
+      return;
+    }
+    memcpy(nodeFirmwareImage_ + nodeFirmwareReceived_, upload.buf,
+           upload.currentSize);
+    nodeFirmwareReceived_ += upload.currentSize;
+    return;
+  }
+
+  if (upload.status == UPLOAD_FILE_END) {
+    if (!nodeFirmwareUploadError_.isEmpty()) return;
+    nodeFirmwareSize_ = nodeFirmwareReceived_;
+    if (!validC3FirmwareImage(nodeFirmwareImage_, nodeFirmwareSize_)) {
+      nodeFirmwareUploadError_ =
+          "file is not a valid ESP32-C3 application image";
+      return;
+    }
+    uint8_t sha256[32]{};
+    if (mbedtls_sha256_ret(nodeFirmwareImage_, nodeFirmwareSize_, sha256, 0) !=
+        0) {
+      nodeFirmwareUploadError_ = "failed to hash firmware image";
+      return;
+    }
+    if (!nodes_.requestNodeFirmwareUpdate(nodeFirmwareTarget_,
+                                          nodeFirmwareImage_,
+                                          nodeFirmwareSize_, sha256,
+                                          millis())) {
+      nodeFirmwareUploadError_ = "target C3 is unavailable or busy";
+      return;
+    }
+    nodeFirmwareUploadComplete_ = true;
+    return;
+  }
+
+  if (upload.status == UPLOAD_FILE_ABORTED) {
+    nodeFirmwareUploadError_ = "firmware upload was aborted";
+  }
+}
+
+void WebApi::handleNodeFirmwareUpload() {
+  if (!nodeFirmwareUploadError_.isEmpty() ||
+      !nodeFirmwareUploadComplete_) {
+    const String message = nodeFirmwareUploadError_.isEmpty()
+                               ? String("firmware upload did not complete")
+                               : nodeFirmwareUploadError_;
+    if (nodeFirmwareImage_ != nullptr && !nodeFirmwareUploadComplete_) {
+      heap_caps_free(nodeFirmwareImage_);
+      nodeFirmwareImage_ = nullptr;
+    }
+    sendApiResult(false, message.c_str());
+    return;
+  }
+  String json = F("{\"ok\":true,\"pending\":true,\"nodeId\":\"");
+  char nodeId[9]{};
+  snprintf(nodeId, sizeof(nodeId), "%08lx",
+           static_cast<unsigned long>(nodeFirmwareTarget_));
+  json += nodeId;
+  json += F("\",\"imageSize\":");
+  json += nodeFirmwareSize_;
+  json += '}';
+  server_.send(202, "application/json; charset=utf-8", json);
+}
+
+void WebApi::handleGetNodeFirmwareStatus() {
+  const NodeFirmwareTransferStatus status = nodes_.firmwareUpdateStatus();
+  char nodeId[9]{};
+  snprintf(nodeId, sizeof(nodeId), "%08lx",
+           static_cast<unsigned long>(status.nodeId));
+  const uint32_t progress =
+      status.imageSize == 0U
+          ? 0U
+          : static_cast<uint32_t>(
+                (static_cast<uint64_t>(status.confirmedBytes) * 100U) /
+                status.imageSize);
+  String json;
+  json.reserve(220);
+  json += F("{\"ok\":true,\"state\":\"");
+  json += firmwareTransferStateName(status.state);
+  json += F("\",\"nodeId\":\"");
+  json += nodeId;
+  json += F("\",\"imageSize\":");
+  json += status.imageSize;
+  json += F(",\"confirmedBytes\":");
+  json += status.confirmedBytes;
+  json += F(",\"progress\":");
+  json += progress;
+  json += F(",\"error\":\"");
+  json += firmwareErrorName(status.error);
+  json += F("\"}");
+  server_.send(200, "application/json; charset=utf-8", json);
+}
+
 void WebApi::handleApiStatus() {
   const StateSnapshot snapshot = commands_.snapshot();
   const PersistedLightingState &state = snapshot.lighting;
@@ -933,6 +1158,18 @@ void WebApi::handleGetNodes() {
     json += connectionStateName(record->connectionState);
     json += F("\",\"capabilities\":");
     json += record->capabilities.capabilityBits;
+    json += F(",\"otaCapable\":");
+    json += (record->capabilities.capabilityBits &
+             node::capabilityMask(node::Capability::FirmwareUpdate)) != 0U
+                ? F("true")
+                : F("false");
+    json += F(",\"firmware\":\"");
+    json += record->capabilities.firmwareMajor;
+    json += '.';
+    json += record->capabilities.firmwareMinor;
+    json += '.';
+    json += record->capabilities.firmwarePatch;
+    json += '"';
     json += F(",\"ledCount\":");
     json += record->status.ledCount;
     json += F(",\"bound\":");

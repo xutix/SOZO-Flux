@@ -4,12 +4,157 @@
 
 #include <C3NodeApplication.h>
 #include <NodeControlPort.h>
+#include <NodeFirmwareReceiver.h>
 #include <NodeLedCountPort.h>
 #include <NodeSceneRuntime.h>
 #include <PairingWindow.h>
 #include "../../../SOZO-Common/test/TestHarness.h"
 
 namespace {
+
+class FakeFirmwareWriter final : public sozo::c3::FirmwareWriterPort {
+ public:
+  bool begin(const uint32_t imageSize) override {
+    ++beginCalls;
+    expectedSize = imageSize;
+    length = 0U;
+    return beginSucceeds;
+  }
+
+  bool write(const uint8_t *data, const size_t dataLength) override {
+    ++writeCalls;
+    if (!writeSucceeds || length + dataLength > sizeof(bytes)) return false;
+    for (size_t i = 0; i < dataLength; ++i) bytes[length + i] = data[i];
+    length += dataLength;
+    return true;
+  }
+
+  sozo::c3::FirmwareCommitResult finish(
+      const uint8_t expectedSha256[32]) override {
+    ++finishCalls;
+    for (size_t i = 0; i < 32U; ++i) receivedSha256[i] = expectedSha256[i];
+    return finishResult;
+  }
+
+  void abort() override { ++abortCalls; }
+
+  bool beginSucceeds{true};
+  bool writeSucceeds{true};
+  sozo::c3::FirmwareCommitResult finishResult{
+      sozo::c3::FirmwareCommitResult::Ok};
+  uint32_t expectedSize{0U};
+  uint8_t bytes[512]{};
+  uint8_t receivedSha256[32]{};
+  size_t length{0U};
+  int beginCalls{0};
+  int writeCalls{0};
+  int finishCalls{0};
+  int abortCalls{0};
+};
+
+sozo::node::FirmwareBeginPayload makeFirmwareBegin(const uint32_t imageSize) {
+  sozo::node::FirmwareBeginPayload begin{};
+  begin.imageSize = imageSize;
+  for (size_t i = 0; i < sizeof(begin.sha256); ++i) {
+    begin.sha256[i] = static_cast<uint8_t>(i + 1U);
+  }
+  return begin;
+}
+
+sozo::node::FirmwareChunkPayload makeFirmwareChunk(
+    const uint32_t offset, const std::initializer_list<uint8_t> bytes) {
+  sozo::node::FirmwareChunkPayload chunk{};
+  chunk.offset = offset;
+  chunk.dataLength = static_cast<uint16_t>(bytes.size());
+  size_t index = 0U;
+  for (const uint8_t value : bytes) chunk.data[index++] = value;
+  return chunk;
+}
+
+void test_firmware_receiver_commits_only_an_ordered_complete_image() {
+  FakeFirmwareWriter writer;
+  sozo::c3::NodeFirmwareReceiver receiver(writer, 512U, 5000U);
+
+  CHECK_TRUE(receiver.begin(makeFirmwareBegin(5U), 100U));
+  CHECK_TRUE(receiver.append(makeFirmwareChunk(0U, {1U, 2U, 3U}), 110U));
+  CHECK_TRUE(receiver.append(makeFirmwareChunk(3U, {4U, 5U}), 120U));
+  CHECK_TRUE(receiver.finish(130U));
+
+  CHECK_EQ(1, writer.beginCalls);
+  CHECK_EQ(2, writer.writeCalls);
+  CHECK_EQ(1, writer.finishCalls);
+  CHECK_EQ(5U, writer.length);
+  CHECK_EQ(5U, receiver.status().nextOffset);
+  CHECK_EQ(sozo::node::FirmwareUpdateState::ReadyToRestart,
+           receiver.status().state);
+  CHECK_TRUE(receiver.restartRequested());
+}
+
+void test_firmware_receiver_rejects_a_gap_without_advancing() {
+  FakeFirmwareWriter writer;
+  sozo::c3::NodeFirmwareReceiver receiver(writer, 512U, 5000U);
+  CHECK_TRUE(receiver.begin(makeFirmwareBegin(5U), 100U));
+
+  CHECK_TRUE(!receiver.append(makeFirmwareChunk(2U, {3U, 4U}), 110U));
+  CHECK_EQ(0U, receiver.status().nextOffset);
+  CHECK_EQ(sozo::node::FirmwareUpdateError::UnexpectedOffset,
+           receiver.status().error);
+  CHECK_EQ(0, writer.writeCalls);
+  CHECK_TRUE(receiver.active());
+}
+
+void test_firmware_receiver_acknowledges_a_duplicate_chunk_without_rewrite() {
+  FakeFirmwareWriter writer;
+  sozo::c3::NodeFirmwareReceiver receiver(writer, 512U, 5000U);
+  CHECK_TRUE(receiver.begin(makeFirmwareBegin(4U), 100U));
+  const auto chunk = makeFirmwareChunk(0U, {1U, 2U});
+  CHECK_TRUE(receiver.append(chunk, 110U));
+  CHECK_TRUE(receiver.append(chunk, 120U));
+  CHECK_EQ(1, writer.writeCalls);
+  CHECK_EQ(2U, receiver.status().nextOffset);
+}
+
+void test_firmware_receiver_acknowledges_a_retried_matching_begin() {
+  FakeFirmwareWriter writer;
+  sozo::c3::NodeFirmwareReceiver receiver(writer, 512U, 5000U);
+  const auto begin = makeFirmwareBegin(4U);
+  CHECK_TRUE(receiver.begin(begin, 100U));
+  CHECK_TRUE(receiver.begin(begin, 110U));
+  CHECK_EQ(1, writer.beginCalls);
+  CHECK_EQ(sozo::node::FirmwareUpdateError::None, receiver.status().error);
+  CHECK_TRUE(receiver.active());
+}
+
+void test_firmware_receiver_aborts_on_hash_failure_disconnect_and_timeout() {
+  FakeFirmwareWriter hashWriter;
+  hashWriter.finishResult = sozo::c3::FirmwareCommitResult::HashMismatch;
+  sozo::c3::NodeFirmwareReceiver hashReceiver(hashWriter, 512U, 5000U);
+  CHECK_TRUE(hashReceiver.begin(makeFirmwareBegin(2U), 100U));
+  CHECK_TRUE(hashReceiver.append(makeFirmwareChunk(0U, {1U, 2U}), 110U));
+  CHECK_TRUE(!hashReceiver.finish(120U));
+  CHECK_EQ(sozo::node::FirmwareUpdateError::HashMismatch,
+           hashReceiver.status().error);
+  CHECK_TRUE(!hashReceiver.restartRequested());
+
+  FakeFirmwareWriter disconnectWriter;
+  sozo::c3::NodeFirmwareReceiver disconnectReceiver(disconnectWriter, 512U,
+                                                     5000U);
+  CHECK_TRUE(disconnectReceiver.begin(makeFirmwareBegin(2U), 100U));
+  disconnectReceiver.onDisconnected();
+  CHECK_EQ(1, disconnectWriter.abortCalls);
+  CHECK_EQ(sozo::node::FirmwareUpdateError::LinkLost,
+           disconnectReceiver.status().error);
+
+  FakeFirmwareWriter timeoutWriter;
+  sozo::c3::NodeFirmwareReceiver timeoutReceiver(timeoutWriter, 512U, 5000U);
+  CHECK_TRUE(timeoutReceiver.begin(makeFirmwareBegin(2U), 100U));
+  timeoutReceiver.tick(5100U);
+  CHECK_EQ(0, timeoutWriter.abortCalls);
+  timeoutReceiver.tick(5101U);
+  CHECK_EQ(1, timeoutWriter.abortCalls);
+  CHECK_EQ(sozo::node::FirmwareUpdateError::Timeout,
+           timeoutReceiver.status().error);
+}
 
 class FakeLightingSink final : public sozo::c3::NodeLightingSink {
  public:
@@ -438,6 +583,65 @@ void test_node_application_resets_stream_ordering_on_disconnect() {
   CHECK_EQ(75.0F, sink.lastAudio.volume);
 }
 
+void test_node_application_exposes_and_runs_firmware_update_protocol() {
+  FakeLightingSink sink(sozo::makeDefaultPersistedLightingState());
+  FakeButtonInput button;
+  FakeDiagnostics diagnostics;
+  FakeBindingRepository bindings;
+  bindings.binding.bound = true;
+  bindings.binding.coordinatorNodeId = sozo::node::kCoordinatorNodeId;
+  bindings.binding.bleIdentityAddress = 0xAABBCCDDEEFFU;
+  FakeNodeControlRepository controls;
+  FakeNodeLedCountRepository ledCounts;
+  FakeNodeTransport transport;
+  FakeFirmwareWriter writer;
+  sozo::c3::NodeFirmwareReceiver firmwareReceiver(writer, 512U, 5000U);
+  sozo::c3::PairingWindow pairing(1500U, 60000U);
+  const sozo::c3::C3NodeProfile profile{60U, 512U, 1U};
+  sozo::c3::C3NodeApplication app(
+      sink, button, diagnostics, pairing, transport, bindings, controls,
+      ledCounts, profile, &firmwareReceiver);
+  CHECK_TRUE(app.begin(0xC3000042U, 0U));
+  CHECK_TRUE((transport.receivedCapabilities.capabilityBits &
+              sozo::node::capabilityMask(
+                  sozo::node::Capability::FirmwareUpdate)) != 0U);
+
+  sozo::node::Envelope request{};
+  request.sourceNodeId = sozo::node::kCoordinatorNodeId;
+  request.targetNodeId = app.nodeId();
+  request.correlationId = 71U;
+  CHECK_EQ(sozo::node::CodecResult::Ok,
+           sozo::node::writeFirmwareBegin(request, makeFirmwareBegin(3U)));
+  transport.queueInbound(request);
+  CHECK_EQ(sozo::c3::C3NodeEvent::None, app.tick(100U));
+
+  request = {};
+  request.sourceNodeId = sozo::node::kCoordinatorNodeId;
+  request.targetNodeId = app.nodeId();
+  request.correlationId = 72U;
+  CHECK_EQ(sozo::node::CodecResult::Ok,
+           sozo::node::writeFirmwareChunk(
+               request, makeFirmwareChunk(0U, {1U, 2U, 3U})));
+  transport.queueInbound(request);
+  CHECK_EQ(sozo::c3::C3NodeEvent::None, app.tick(110U));
+
+  request = {};
+  request.sourceNodeId = sozo::node::kCoordinatorNodeId;
+  request.targetNodeId = app.nodeId();
+  request.correlationId = 73U;
+  CHECK_EQ(sozo::node::CodecResult::Ok,
+           sozo::node::writeFirmwareEnd(request));
+  transport.queueInbound(request);
+  CHECK_EQ(sozo::c3::C3NodeEvent::FirmwareRestartRequested, app.tick(120U));
+
+  CHECK_EQ(3U, transport.sentCount);
+  sozo::node::FirmwareStatusPayload status{};
+  CHECK_EQ(sozo::node::CodecResult::Ok,
+           sozo::node::readFirmwareStatus(transport.sent[2], status));
+  CHECK_EQ(sozo::node::FirmwareUpdateState::ReadyToRestart, status.state);
+  CHECK_EQ(3U, status.nextOffset);
+}
+
 void test_manual_lit_count_is_local_output_command_not_layout_change() {
   sozo::PersistedLightingState local{};
   local.layout.activeCount = 300;
@@ -625,6 +829,11 @@ void test_node_led_count_is_saved_locally_and_survives_scene_commands() {
 }  // namespace
 
 int runNodeRuntimeTests() {
+  test_firmware_receiver_commits_only_an_ordered_complete_image();
+  test_firmware_receiver_rejects_a_gap_without_advancing();
+  test_firmware_receiver_acknowledges_a_duplicate_chunk_without_rewrite();
+  test_firmware_receiver_acknowledges_a_retried_matching_begin();
+  test_firmware_receiver_aborts_on_hash_failure_disconnect_and_timeout();
   test_new_scene_applies_render_intent_but_preserves_local_hardware();
   test_duplicate_and_stale_scene_versions_do_not_reapply();
   test_independent_scene_isolated_from_follow_scene_until_follow_is_restored();
@@ -633,6 +842,7 @@ int runNodeRuntimeTests() {
   test_latest_audio_features_drive_tick_on_coordinator_clock();
   test_audio_sequence_restarts_after_transport_disconnect();
   test_node_application_resets_stream_ordering_on_disconnect();
+  test_node_application_exposes_and_runs_firmware_update_protocol();
   test_manual_lit_count_is_local_output_command_not_layout_change();
   test_pairing_window_requires_runtime_long_press();
   test_boot_held_button_must_be_released_before_pairing_press();

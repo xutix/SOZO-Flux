@@ -3,6 +3,7 @@
 #include <NodeCoordinator.h>
 #include <NodeFleetCoordinator.h>
 #include <NodeFleetTransport.h>
+#include <NodeFirmwareTransfer.h>
 #include <NodeTransport.h>
 #include <BleLinkStateMachine.h>
 #include <BleOperationSupervisor.h>
@@ -103,6 +104,110 @@ class FakeNodeFleetTransport final : public sozo::NodeFleetTransport {
   bool began{false};
   bool pairingOpen{false};
 };
+
+sozo::node::Envelope makeFirmwareStatusResponse(
+    const sozo::node::Envelope &request,
+    const sozo::node::FirmwareUpdateState state, const uint32_t nextOffset,
+    const uint32_t imageSize,
+    const sozo::node::FirmwareUpdateError error =
+        sozo::node::FirmwareUpdateError::None) {
+  sozo::node::FirmwareStatusPayload payload{};
+  payload.state = state;
+  payload.nextOffset = nextOffset;
+  payload.imageSize = imageSize;
+  payload.error = error;
+  sozo::node::Envelope response{};
+  response.sourceNodeId = request.targetNodeId;
+  response.targetNodeId = request.sourceNodeId;
+  response.correlationId = request.correlationId;
+  CHECK_EQ(sozo::node::CodecResult::Ok,
+           sozo::node::writeFirmwareStatus(response, payload));
+  return response;
+}
+
+void test_firmware_transfer_waits_for_each_c3_status_before_advancing() {
+  FakeNodeTransport transport;
+  sozo::NodeFirmwareTransfer transfer(transport, 1000U, 2U);
+  const uint8_t image[]{1U, 2U, 3U, 4U};
+  uint8_t sha256[32]{};
+  sha256[0] = 0xA5U;
+
+  CHECK_TRUE(transfer.start(transport.remoteId, image, sizeof(image), sha256,
+                            100U));
+  transfer.tick(100U);
+  CHECK_EQ(1U, transport.sentCount);
+  CHECK_EQ(sozo::node::MessageType::FirmwareBegin,
+           transport.sent[0].messageType);
+  CHECK_TRUE(transfer.handleInbound(makeFirmwareStatusResponse(
+      transport.sent[0], sozo::node::FirmwareUpdateState::Receiving, 0U,
+      sizeof(image))));
+
+  transfer.tick(110U);
+  CHECK_EQ(2U, transport.sentCount);
+  CHECK_EQ(sozo::node::MessageType::FirmwareChunk,
+           transport.sent[1].messageType);
+  sozo::node::FirmwareChunkPayload chunk{};
+  CHECK_EQ(sozo::node::CodecResult::Ok,
+           sozo::node::readFirmwareChunk(transport.sent[1], chunk));
+  CHECK_EQ(0U, chunk.offset);
+  CHECK_EQ(sizeof(image), chunk.dataLength);
+  CHECK_TRUE(transfer.handleInbound(makeFirmwareStatusResponse(
+      transport.sent[1], sozo::node::FirmwareUpdateState::Receiving,
+      sizeof(image), sizeof(image))));
+
+  transfer.tick(120U);
+  CHECK_EQ(3U, transport.sentCount);
+  CHECK_EQ(sozo::node::MessageType::FirmwareEnd,
+           transport.sent[2].messageType);
+  CHECK_TRUE(transfer.handleInbound(makeFirmwareStatusResponse(
+      transport.sent[2], sozo::node::FirmwareUpdateState::ReadyToRestart,
+      sizeof(image), sizeof(image))));
+  CHECK_EQ(sozo::NodeFirmwareTransferState::Succeeded,
+           transfer.status().state);
+  CHECK_EQ(sizeof(image), transfer.status().confirmedBytes);
+}
+
+void test_firmware_transfer_retries_a_lost_status_then_fails_boundedly() {
+  FakeNodeTransport transport;
+  sozo::NodeFirmwareTransfer transfer(transport, 100U, 2U);
+  const uint8_t image[]{1U};
+  uint8_t sha256[32]{};
+  CHECK_TRUE(transfer.start(transport.remoteId, image, sizeof(image), sha256,
+                            100U));
+  transfer.tick(100U);
+  transfer.tick(201U);
+  transfer.tick(302U);
+  CHECK_EQ(3U, transport.sentCount);
+  transfer.tick(403U);
+  CHECK_EQ(sozo::NodeFirmwareTransferState::Failed,
+           transfer.status().state);
+  CHECK_EQ(sozo::node::FirmwareUpdateError::Timeout,
+           transfer.status().error);
+}
+
+void test_fleet_allows_only_one_c3_firmware_update_at_a_time() {
+  FakeNodeFleetTransport transport;
+  for (FakeNodeTransport &link : transport.links) {
+    link.remoteCapabilities.capabilityBits |= sozo::node::capabilityMask(
+        sozo::node::Capability::FirmwareUpdate);
+  }
+  sozo::NodeFleetCoordinator fleet(transport);
+  CHECK_TRUE(fleet.begin());
+  const auto state = sozo::makeDefaultPersistedLightingState();
+  const sozo::LightingSnapshot runtime{state.mode, state.layout.activeCount,
+                                       false, -1};
+  const sozo::AudioFrame audio{};
+  fleet.tick(100U, state, runtime, audio);
+
+  const uint8_t image[]{1U, 2U};
+  uint8_t sha256[32]{};
+  CHECK_TRUE(fleet.requestNodeFirmwareUpdate(
+      transport.links[0].remoteId, image, sizeof(image), sha256, 101U));
+  CHECK_TRUE(!fleet.requestNodeFirmwareUpdate(
+      transport.links[1].remoteId, image, sizeof(image), sha256, 102U));
+  CHECK_EQ(transport.links[0].remoteId,
+           fleet.firmwareUpdateStatus().nodeId);
+}
 
 void test_maps_every_runtime_effect_parameter() {
   sozo::PersistedLightingState state{};
@@ -790,6 +895,9 @@ void test_fleet_routes_a_device_command_only_to_the_selected_node() {
 }  // namespace
 
 int runNodeTests() {
+  test_firmware_transfer_waits_for_each_c3_status_before_advancing();
+  test_firmware_transfer_retries_a_lost_status_then_fails_boundedly();
+  test_fleet_allows_only_one_c3_firmware_update_at_a_time();
   test_maps_every_runtime_effect_parameter();
   test_scene_does_not_grow_with_physical_led_count();
   test_audio_features_are_clamped_and_scaled();

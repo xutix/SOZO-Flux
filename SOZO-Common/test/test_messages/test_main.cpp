@@ -13,6 +13,11 @@ using sozo::node::CommandReceiptPayload;
 using sozo::node::CodecResult;
 using sozo::node::ControlModePayload;
 using sozo::node::Envelope;
+using sozo::node::FirmwareBeginPayload;
+using sozo::node::FirmwareChunkPayload;
+using sozo::node::FirmwareStatusPayload;
+using sozo::node::FirmwareUpdateError;
+using sozo::node::FirmwareUpdateState;
 using sozo::node::HeartbeatPayload;
 using sozo::node::LedCountPayload;
 using sozo::node::MessageType;
@@ -316,6 +321,55 @@ void test_control_mode_request_round_trips_and_rejects_invalid_mode() {
            sozo::node::readControlModeRequest(invalid, rejected));
 }
 
+void test_firmware_update_messages_preserve_hash_offset_and_progress() {
+  FirmwareBeginPayload begin{};
+  begin.imageSize = 552544U;
+  for (uint8_t index = 0; index < 32U; ++index) {
+    begin.sha256[index] = static_cast<uint8_t>(0xA0U + index);
+  }
+  const FirmwareBeginPayload decodedBegin =
+      roundTrip(MessageType::FirmwareBegin, begin,
+                sozo::node::writeFirmwareBegin,
+                sozo::node::readFirmwareBegin);
+  CHECK_EQ(552544U, decodedBegin.imageSize);
+  CHECK_MEMORY_EQ(begin.sha256, decodedBegin.sha256, 32U);
+
+  FirmwareChunkPayload chunk{};
+  chunk.offset = 304U;
+  chunk.dataLength = 7U;
+  const uint8_t expectedData[7] = {0xE9U, 1U, 2U, 3U, 4U, 5U, 6U};
+  for (uint16_t index = 0; index < chunk.dataLength; ++index) {
+    chunk.data[index] = expectedData[index];
+  }
+  const FirmwareChunkPayload decodedChunk =
+      roundTrip(MessageType::FirmwareChunk, chunk,
+                sozo::node::writeFirmwareChunk,
+                sozo::node::readFirmwareChunk);
+  CHECK_EQ(304U, decodedChunk.offset);
+  CHECK_EQ(7U, decodedChunk.dataLength);
+  CHECK_MEMORY_EQ(expectedData, decodedChunk.data, 7U);
+
+  FirmwareStatusPayload status{};
+  status.state = FirmwareUpdateState::Receiving;
+  status.nextOffset = 311U;
+  status.imageSize = 552544U;
+  status.error = FirmwareUpdateError::None;
+  const FirmwareStatusPayload decodedStatus =
+      roundTrip(MessageType::FirmwareStatus, status,
+                sozo::node::writeFirmwareStatus,
+                sozo::node::readFirmwareStatus);
+  CHECK_EQ(FirmwareUpdateState::Receiving, decodedStatus.state);
+  CHECK_EQ(311U, decodedStatus.nextOffset);
+  CHECK_EQ(552544U, decodedStatus.imageSize);
+  CHECK_EQ(FirmwareUpdateError::None, decodedStatus.error);
+
+  Envelope end{};
+  CHECK_EQ(CodecResult::Ok, sozo::node::writeFirmwareEnd(end));
+  CHECK_EQ(MessageType::FirmwareEnd, end.messageType);
+  CHECK_EQ(0U, end.payloadLength);
+  CHECK_EQ(CodecResult::Ok, sozo::node::readFirmwareEnd(end));
+}
+
 void test_led_geometry_maps_only_active_physical_pixels() {
   const sozo::lighting::LedGeometry geometry{60U, 62U, false};
   CHECK_TRUE(sozo::lighting::isValidLedGeometry(geometry));
@@ -354,6 +408,7 @@ int main(int, char **) {
   test_led_count_request_round_trips_and_rejects_zero();
   test_status_request_has_no_payload_and_is_validated();
   test_control_mode_request_round_trips_and_rejects_invalid_mode();
+  test_firmware_update_messages_preserve_hash_offset_and_progress();
   test_led_geometry_maps_only_active_physical_pixels();
   test_led_geometry_reverses_active_pixels_without_mapping_tail();
   test_led_geometry_rejects_empty_and_oversized_active_ranges();

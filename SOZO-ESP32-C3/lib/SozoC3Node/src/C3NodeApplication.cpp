@@ -1,4 +1,5 @@
 #include <C3NodeApplication.h>
+#include <SozoVersion.h>
 
 namespace sozo::c3 {
 namespace {
@@ -28,7 +29,7 @@ C3NodeApplication::C3NodeApplication(
     NodeDiagnosticsPort &diagnostics, PairingWindow &pairingWindow,
     NodeTransportPort &transport, NodeBindingRepository &bindings,
     NodeControlRepository &controls, NodeLedCountRepository &ledCounts,
-    const C3NodeProfile profile)
+    const C3NodeProfile profile, NodeFirmwareReceiver *firmwareReceiver)
     : lighting_(lighting),
       button_(button),
       diagnostics_(diagnostics),
@@ -37,6 +38,7 @@ C3NodeApplication::C3NodeApplication(
       bindings_(bindings),
       controls_(controls),
       ledCounts_(ledCounts),
+      firmwareReceiver_(firmwareReceiver),
       profile_(profile),
       sceneRuntime_(lighting) {}
 
@@ -74,7 +76,10 @@ C3NodeEvent C3NodeApplication::tick(const uint32_t nowMs) {
   if (!initialized_) return C3NodeEvent::None;
 
   const bool connected = transport_.connected();
-  if (transportConnected_ && !connected) sceneRuntime_.onDisconnected();
+  if (transportConnected_ && !connected) {
+    sceneRuntime_.onDisconnected();
+    if (firmwareReceiver_ != nullptr) firmwareReceiver_->onDisconnected();
+  }
   transportConnected_ = connected;
 
   const PairingEvent pairingEvent = pairingWindow_.tick(button_.pressed(), nowMs);
@@ -89,6 +94,12 @@ C3NodeEvent C3NodeApplication::tick(const uint32_t nowMs) {
 
   node::Envelope inbound{};
   while (transport_.popInbound(inbound)) handleInbound(inbound, nowMs);
+  if (firmwareReceiver_ != nullptr) {
+    firmwareReceiver_->tick(nowMs);
+    if (firmwareReceiver_->restartRequested()) {
+      return C3NodeEvent::FirmwareRestartRequested;
+    }
+  }
   sceneRuntime_.tick(nowMs);
 
   if (pairingEvent == PairingEvent::Opened) return C3NodeEvent::PairingOpened;
@@ -121,13 +132,17 @@ PersistedLightingState C3NodeApplication::makeLocalState(
 node::CapabilitiesPayload C3NodeApplication::makeCapabilities() const {
   node::CapabilitiesPayload capabilities{};
   capabilities.capabilityBits = node::capabilityMask(node::Capability::LightOutput);
+  if (firmwareReceiver_ != nullptr) {
+    capabilities.capabilityBits |=
+        node::capabilityMask(node::Capability::FirmwareUpdate);
+  }
   capabilities.maxLedCount = profile_.maxLedCount;
   capabilities.maxPacketBytes = node::kMaxPacketBytes;
   capabilities.protocolMin = node::kProtocolVersion;
   capabilities.protocolMax = node::kProtocolVersion;
-  capabilities.firmwareMajor = 0;
-  capabilities.firmwareMinor = 1;
-  capabilities.firmwarePatch = 0;
+  capabilities.firmwareMajor = version::kNodeC3Major;
+  capabilities.firmwareMinor = version::kNodeC3Minor;
+  capabilities.firmwarePatch = version::kNodeC3Patch;
   capabilities.controlMode = sceneRuntime_.controlMode();
   capabilities.hardwareProfile = profile_.hardwareProfile;
   capabilities.bound = binding_.bound;
@@ -136,6 +151,33 @@ node::CapabilitiesPayload C3NodeApplication::makeCapabilities() const {
 
 void C3NodeApplication::handleInbound(const node::Envelope &envelope,
                                       const uint32_t nowMs) {
+  if (firmwareReceiver_ != nullptr) {
+    if (envelope.messageType == node::MessageType::FirmwareBegin) {
+      node::FirmwareBeginPayload payload{};
+      if (node::readFirmwareBegin(envelope, payload) == node::CodecResult::Ok) {
+        firmwareReceiver_->begin(payload, nowMs);
+      }
+      sendFirmwareStatus(envelope, nowMs);
+      return;
+    }
+    if (envelope.messageType == node::MessageType::FirmwareChunk) {
+      node::FirmwareChunkPayload payload{};
+      if (node::readFirmwareChunk(envelope, payload) == node::CodecResult::Ok) {
+        firmwareReceiver_->append(payload, nowMs);
+      }
+      sendFirmwareStatus(envelope, nowMs);
+      return;
+    }
+    if (envelope.messageType == node::MessageType::FirmwareEnd) {
+      if (node::readFirmwareEnd(envelope) == node::CodecResult::Ok) {
+        firmwareReceiver_->finish(nowMs);
+      }
+      sendFirmwareStatus(envelope, nowMs);
+      return;
+    }
+    if (firmwareReceiver_->active()) return;
+  }
+
   switch (envelope.messageType) {
     case node::MessageType::BindRequest:
       handleBindRequest(envelope, nowMs);
@@ -341,6 +383,22 @@ void C3NodeApplication::sendStatusSnapshot(const node::Envelope &request,
   response.correlationId = request.correlationId;
   node::writeStatusSnapshot(response, status);
   transport_.send(response);
+}
+
+void C3NodeApplication::sendFirmwareStatus(const node::Envelope &request,
+                                           const uint32_t nowMs) {
+  if (firmwareReceiver_ == nullptr) return;
+  node::Envelope response{};
+  response.channelId = static_cast<uint16_t>(node::TopicId::NodeState);
+  response.sourceNodeId = nodeId_;
+  response.targetNodeId = request.sourceNodeId;
+  response.sequence = outboundSequence_++;
+  response.timestampMs = nowMs;
+  response.correlationId = request.correlationId;
+  if (node::writeFirmwareStatus(response, firmwareReceiver_->status()) ==
+      node::CodecResult::Ok) {
+    transport_.send(response);
+  }
 }
 
 }  // namespace sozo::c3
