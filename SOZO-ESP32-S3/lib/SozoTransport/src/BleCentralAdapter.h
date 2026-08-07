@@ -10,6 +10,7 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 
 namespace sozo {
@@ -118,6 +119,8 @@ class BleCentralAdapter final : public NodeTransport,
   QueueHandle_t workerCommandQueue_{nullptr};
   QueueHandle_t workerEventQueue_{nullptr};
   QueueHandle_t inboundQueue_{nullptr};
+  // NimBLE reserves task notifications for synchronous client operations.
+  SemaphoreHandle_t workerWakeSemaphore_{nullptr};
   TaskHandle_t workerTask_{nullptr};
   node::CapabilitiesPayload capabilities_{};
   node::NodeId remoteNodeId_{0};

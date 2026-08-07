@@ -30,19 +30,32 @@ bool BleCentralAdapter::begin() {
   workerEventQueue_ =
       xQueueCreate(kWorkerEventQueueCapacity, sizeof(WorkerEvent));
   inboundQueue_ = xQueueCreate(kInboundQueueCapacity, sizeof(node::Envelope));
+  workerWakeSemaphore_ = xSemaphoreCreateBinary();
   if (workerCommandQueue_ == nullptr || workerEventQueue_ == nullptr ||
-      inboundQueue_ == nullptr) {
+      inboundQueue_ == nullptr || workerWakeSemaphore_ == nullptr) {
     if (workerCommandQueue_ != nullptr) vQueueDelete(workerCommandQueue_);
     if (workerEventQueue_ != nullptr) vQueueDelete(workerEventQueue_);
     if (inboundQueue_ != nullptr) vQueueDelete(inboundQueue_);
+    if (workerWakeSemaphore_ != nullptr) {
+      vSemaphoreDelete(workerWakeSemaphore_);
+    }
     workerCommandQueue_ = nullptr;
     workerEventQueue_ = nullptr;
     inboundQueue_ = nullptr;
+    workerWakeSemaphore_ = nullptr;
     return false;
   }
 
   if (xTaskCreate(workerEntry, "sozo-ble-worker", kWorkerStackBytes, this,
                   kWorkerPriority, &workerTask_) != pdPASS) {
+    vQueueDelete(workerCommandQueue_);
+    vQueueDelete(workerEventQueue_);
+    vQueueDelete(inboundQueue_);
+    vSemaphoreDelete(workerWakeSemaphore_);
+    workerCommandQueue_ = nullptr;
+    workerEventQueue_ = nullptr;
+    inboundQueue_ = nullptr;
+    workerWakeSemaphore_ = nullptr;
     workerTask_ = nullptr;
     return false;
   }
@@ -72,12 +85,14 @@ void BleCentralAdapter::tick(const uint32_t nowMs) {
 }
 
 bool BleCentralAdapter::send(const node::Envelope &envelope) {
-  if (!ready() || workerTask_ == nullptr) return false;
+  if (!ready() || workerTask_ == nullptr || workerWakeSemaphore_ == nullptr) {
+    return false;
+  }
   bool accepted = false;
   portENTER_CRITICAL(&outboundMux_);
   accepted = outbound_.push(envelope);
   portEXIT_CRITICAL(&outboundMux_);
-  if (accepted) xTaskNotifyGive(workerTask_);
+  if (accepted) xSemaphoreGive(workerWakeSemaphore_);
   return accepted;
 }
 
@@ -344,7 +359,7 @@ void BleCentralAdapter::runConnectAttempt(const WorkerCommand &command) {
   while (client->isConnected() && workerAttemptActive(command.attemptId)) {
     node::Envelope envelope{};
     if (!popOutbound(envelope)) {
-      ulTaskNotifyTake(pdTRUE, kWorkerPollTicks);
+      xSemaphoreTake(workerWakeSemaphore_, kWorkerPollTicks);
       continue;
     }
     if (!writeEnvelope(envelope, command.attemptId)) {
@@ -611,7 +626,7 @@ void BleCentralAdapter::cancelWorkerAttempt(const uint32_t attemptId) {
   portENTER_CRITICAL(&stateMux_);
   if (activeWorkerAttemptId_ == attemptId) workerAttemptCancelled_ = true;
   portEXIT_CRITICAL(&stateMux_);
-  if (workerTask_ != nullptr) xTaskNotifyGive(workerTask_);
+  if (workerWakeSemaphore_ != nullptr) xSemaphoreGive(workerWakeSemaphore_);
 }
 
 bool BleCentralAdapter::workerAttemptActive(const uint32_t attemptId) const {

@@ -43,3 +43,15 @@ test('Arduino tick and send do not call blocking NimBLE operations', () => {
     assert.ok(!send.includes(operation), `send contains ${operation}`);
   }
 });
+
+test('worker wakeups cannot complete NimBLE response waits', () => {
+  for (const taskNotificationOperation of [
+    'xTaskNotifyGive(',
+    'ulTaskNotifyTake(',
+  ]) {
+    assert.ok(
+      !source.includes(taskNotificationOperation),
+      `BLE worker shares NimBLE task notification via ${taskNotificationOperation}`,
+    );
+  }
+});
