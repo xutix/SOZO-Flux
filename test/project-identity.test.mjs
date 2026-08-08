@@ -38,7 +38,7 @@ test('public device surfaces use the SOZO Flux identity', async () => {
 
   const controlPage = await read('SOZO-ESP32-S3/src/SpatialLightPage.cpp');
   assert.match(controlPage, /<title>SOZO Flux 空间灯光<\/title>/);
-  assert.match(controlPage, /SOZO FLUX · SPATIAL LIGHTING/);
+  assert.match(controlPage, /SOZO FLUX · SPATIAL CONTROL/);
 
   const setupPage = await read('SOZO-ESP32-S3/lib/SozoWeb/src/WebApi.cpp');
   assert.match(setupPage, /<title>SOZO Flux 网络设置<\/title>/);

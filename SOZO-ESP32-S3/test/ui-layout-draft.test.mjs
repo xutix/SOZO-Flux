@@ -25,6 +25,8 @@ class Element {
     this.checked = false;
     this.children = [];
     this.className = '';
+    this.parentElement = null;
+    this.queries = new Map();
     this.style = {};
     this.textContent = '';
     this.value = '';
@@ -32,14 +34,21 @@ class Element {
 
   replaceChildren(...children) {
     this.children = children;
+    for (const child of children) child.parentElement = this;
   }
 
   append(...children) {
     this.children.push(...children);
+    for (const child of children) child.parentElement = this;
   }
 
-  querySelector() {
-    return new Element();
+  querySelector(selector) {
+    if (!this.queries.has(selector)) {
+      const element = new Element();
+      element.parentElement = this;
+      this.queries.set(selector, element);
+    }
+    return this.queries.get(selector);
   }
 
   querySelectorAll() {
@@ -48,12 +57,22 @@ class Element {
 
   addEventListener() {}
 
+  contains(target) {
+    if (target === this) return true;
+    return [...this.children, ...this.queries.values()]
+      .some(child => child.contains(target));
+  }
+
   setAttribute(name, value) {
     this.attributes[name] = String(value);
   }
 
   set innerHTML(value) {
     this.html = value;
+    this.children = [];
+    this.queries = new Map();
+    const inputValue = String(value).match(/<input[^>]*\bvalue="([^"]*)"/);
+    if (inputValue) this.querySelector('input').value = inputValue[1];
   }
 }
 
@@ -84,6 +103,20 @@ function findElement(root, predicate) {
 
 function nodeCardTitle(card) {
   return card.children[0].children[0].textContent;
+}
+
+function extensionLedEditor(document) {
+  const panel = document.getElementById('nodeControlPanel');
+  const section = panel.children.find(child => child.className === 'extension-led-count');
+  assert.ok(section, 'wireless-node LED editor must be rendered');
+  return { panel, section, input: section.querySelector('#extensionLedCount') };
+}
+
+function extensionFirmwareEditor(document) {
+  const panel = document.getElementById('nodeControlPanel');
+  const section = panel.children.find(child => child.className === 'extension-firmware');
+  assert.ok(section, 'wireless-node firmware editor must be rendered');
+  return { panel, section, input: section.querySelector('#extensionFirmwareFile') };
 }
 
 function statusWith(profile) {
@@ -132,7 +165,7 @@ function loadPageUi(serverStatus, nodeResponse = { ok: true, nodes: [] },
   const fetchCalls = [];
   const script = match[1].replace(
     'loadStatus();setInterval(()=>loadStatus(false),5000);',
-    'globalThis.__ui={setLayoutProfile,loadStatus,loadNodes,openNodePairing,activateView,saveNodeName,getLayoutProfile:()=>layoutProfile,getActiveView:()=>activeView,setState:value=>state=value,setSelected:value=>selected=value,getState:()=>state,getFetchCalls:()=>fetchCalls,getSelectedNodeId:()=>selectedNodeId,getSelectedRemoteNode:selectedRemoteNode,getScopeValue:()=>document.getElementById(\'scopeValue\').textContent,getNodeNameDrafts:()=>nodeNameDrafts,renderEffects,chooseEffect,renderParameters,renderLightNodes,renderLightNodeControl,renderSpaceStatus,colorControl,extensionColorControl,getParameterClass:typeof parameterLayoutClass===\'function\'?parameterLayoutClass:null,getParameterPlan:typeof parameterPlan===\'function\'?parameterPlan:null,getParameterGridClass:typeof parameterGridClass===\'function\'?parameterGridClass:null,getParameterColumns:typeof parameterColumns===\'function\'?parameterColumns:null,getParameterGridItems:typeof parameterGridItems===\'function\'?parameterGridItems:null};',
+    'globalThis.__ui={setLayoutProfile,loadStatus,loadNodes,openNodePairing,activateView,saveNodeName,getLayoutProfile:()=>layoutProfile,getActiveView:()=>activeView,setState:value=>state=value,setSelected:value=>selected=value,getState:()=>state,getFetchCalls:()=>fetchCalls,getSelectedNodeId:()=>selectedNodeId,getSelectedRemoteNode:selectedRemoteNode,getScopeValue:()=>document.getElementById(\'scopeValue\').textContent,getDraftValue:(nodeId,field=\'name\')=>formDrafts.read(nodeFieldKey(nodeId,field),undefined),renderEffects,chooseEffect,renderParameters,renderLightNodes,renderLightNodeControl,renderSpaceStatus,colorControl,extensionColorControl,getParameterClass:typeof parameterLayoutClass===\'function\'?parameterLayoutClass:null,getParameterPlan:typeof parameterPlan===\'function\'?parameterPlan:null,getParameterGridClass:typeof parameterGridClass===\'function\'?parameterGridClass:null,getParameterColumns:typeof parameterColumns===\'function\'?parameterColumns:null,getParameterGridItems:typeof parameterGridItems===\'function\'?parameterGridItems:null};',
   );
   const sandbox = {
     URLSearchParams,
@@ -521,7 +554,126 @@ test('keeps an unsaved node-name draft across node polling', async () => {
   await ui.loadNodes();
 
   assert.equal(document.getElementById('nodeNameInput').value, '尚未保存的新名称');
-  assert.equal(ui.getNodeNameDrafts()['51930b93'], '尚未保存的新名称');
+  assert.equal(ui.getDraftValue('51930b93'), '尚未保存的新名称');
+});
+
+test('keeps a wireless-node LED-count draft across node polling', async () => {
+  const nodeResponse = { ok: true, nodes: [
+    { id: '51930b93', name: '', lightCapable: true, state: 'ready',
+      bound: true, ledCount: 71, controlMode: 0 },
+  ] };
+  const { document, ui } = loadPageUi(statusWith('continuous'), nodeResponse);
+  ui.setState(statusWith('continuous'));
+  await ui.loadNodes();
+  document.getElementById('lightNodeList').children[1].onclick();
+  const before = extensionLedEditor(document);
+  before.input.value = '123';
+  assert.equal(typeof before.input.oninput, 'function');
+  before.input.oninput();
+  nodeResponse.nodes[0].ledCount = 72;
+
+  await ui.loadNodes();
+
+  const after = extensionLedEditor(document);
+  assert.equal(after.input.value, '123');
+  const remoteCard = document.getElementById('lightNodeList').children[1];
+  assert.match(remoteCard.children[1].children[1].textContent, /72/);
+});
+
+test('does not replace the focused node editor during polling', async () => {
+  const nodeResponse = { ok: true, nodes: [
+    { id: '51930b93', name: '', lightCapable: true, state: 'ready',
+      bound: true, ledCount: 71, controlMode: 0 },
+  ] };
+  const { document, ui } = loadPageUi(statusWith('continuous'), nodeResponse);
+  ui.setState(statusWith('continuous'));
+  await ui.loadNodes();
+  document.getElementById('lightNodeList').children[1].onclick();
+  const before = extensionLedEditor(document);
+  assert.equal(typeof before.panel.onfocusin, 'function');
+  before.panel.onfocusin();
+  before.input.value = '尚在输入法组合态';
+
+  await ui.loadNodes();
+
+  const after = extensionLedEditor(document);
+  assert.equal(after.section, before.section);
+  assert.equal(after.input.value, '尚在输入法组合态');
+
+  before.panel.onfocusout({ relatedTarget: null });
+  nodeResponse.nodes[0].ledCount = 72;
+  await ui.loadNodes();
+
+  const refreshed = extensionLedEditor(document);
+  assert.notEqual(refreshed.section, before.section);
+  assert.equal(refreshed.input.value, '72');
+});
+
+test('keeps editable drafts isolated between wireless nodes', async () => {
+  const nodeResponse = { ok: true, nodes: [
+    { id: '51930b93', name: '', lightCapable: true, state: 'ready',
+      bound: true, ledCount: 71, controlMode: 0 },
+    { id: 'ffd4b7f1', name: '', lightCapable: true, state: 'ready',
+      bound: true, ledCount: 60, controlMode: 0 },
+  ] };
+  const { document, ui } = loadPageUi(statusWith('continuous'), nodeResponse);
+  ui.setState(statusWith('continuous'));
+  await ui.loadNodes();
+
+  document.getElementById('lightNodeList').children[1].onclick();
+  let editor = extensionLedEditor(document);
+  editor.input.value = '123';
+  editor.input.oninput();
+
+  document.getElementById('lightNodeList').children[2].onclick();
+  editor = extensionLedEditor(document);
+  assert.equal(editor.input.value, '60');
+  editor.input.value = '80';
+  editor.input.oninput();
+
+  document.getElementById('lightNodeList').children[1].onclick();
+  assert.equal(extensionLedEditor(document).input.value, '123');
+  document.getElementById('lightNodeList').children[2].onclick();
+  assert.equal(extensionLedEditor(document).input.value, '80');
+});
+
+test('does not discard a selected firmware file during node polling', async () => {
+  const nodeResponse = { ok: true, nodes: [
+    { id: '51930b93', name: '', lightCapable: true, state: 'ready',
+      bound: true, ledCount: 71, controlMode: 0, otaCapable: true,
+      firmware: '0.1.0-alpha' },
+  ] };
+  const { document, ui } = loadPageUi(statusWith('continuous'), nodeResponse);
+  ui.setState(statusWith('continuous'));
+  await ui.loadNodes();
+  document.getElementById('lightNodeList').children[1].onclick();
+  const before = extensionFirmwareEditor(document);
+  before.input.files = [{ name: 'firmware.bin' }];
+  before.input.onchange();
+
+  nodeResponse.nodes[0].firmware = '0.1.1-alpha';
+  await ui.loadNodes();
+
+  const after = extensionFirmwareEditor(document);
+  assert.equal(after.section, before.section);
+  assert.equal(after.input.files[0].name, 'firmware.bin');
+});
+
+test('keeps a directly edited local LED layout across status polling', async () => {
+  const status = statusWith('continuous');
+  const { document, ui } = loadPageUi(status);
+  ui.setState(status);
+  ui.renderLightNodes();
+  const fields = document.getElementById('layoutFields');
+  const input = fields.children[0].querySelector('input');
+  assert.equal(input.value, '144');
+  input.value = '200';
+  input.oninput();
+
+  await ui.loadStatus(false);
+
+  const refreshed = fields.children[0].querySelector('input');
+  assert.equal(refreshed.value, '200');
 });
 
 test('uses the default name as a placeholder and limits input to 16 code points', async () => {
@@ -588,7 +740,7 @@ test('keeps the node-name draft when the Hub rejects a save', async () => {
 
   await ui.saveNodeName('51930b93');
 
-  assert.equal(ui.getNodeNameDrafts()['51930b93'], '保留这份草稿');
+  assert.equal(ui.getDraftValue('51930b93'), '保留这份草稿');
   assert.equal(document.getElementById('nodeNameInput').value, '保留这份草稿');
   assert.match(document.getElementById('nodeMessage').textContent, /保存失败/);
 });
