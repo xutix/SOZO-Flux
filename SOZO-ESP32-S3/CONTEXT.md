@@ -1,22 +1,20 @@
-# SOZO Flux Ubiquitous Language
+# SOZO Flux Hub 术语
 
-- **主灯（Main Light）**：运行当前 SOZO 灯光固件、拥有灯带状态和持久化配置的 ESP32-S3。
-- **控制节点（Control Node）**：自制的按钮、旋钮、滑杆或传感器 ESP32 设备；它不是主灯，也不拥有灯效状态。
-- **控制来源（Control Source）**：命令的起点，例如网页、串口、路由器 Wi-Fi 节点、ESP-NOW 节点、BLE 手机、BLE 节点、语音识别或电脑音频。
-- **传输适配器（Transport Adapter）**：把 HTTP、串口、ESP-NOW 或 BLE 的协议数据解析为控制命令的外层模块。
-- **控制命令（Control Command）**：来源明确、版本明确、类型化且已校验的状态变更请求；只有它能改变主灯的灯光状态。
-- **运行状态（Runtime State）**：主灯当前可公开的灯效、布局、网络与音频快照；它不包含 Wi-Fi 密码等敏感凭据。
-- **持久化灯光状态（Persisted Lighting State）**：需要在重启后恢复的灯效、颜色、参数、开机动画和空间布局；存储在现有 `sozo-light` NVS 命名空间。
-- **音频帧（Audio Frame）**：灯效所需的标准化音量、RMS、鼓点和可用性数据；当前由 INMP441 产生，未来电脑音频可以产生同一数据类型。
-- **灯效（Effect）**：同一时刻唯一活动的渲染模式。`Off` 是输出状态，不是可由控制器选择的灯效。
-- **协调器（Coordinator）**：运行在主设备上的系统协调角色；负责接收控制来源、维护空间灯光状态、管理扩展节点，并通过 SozoBus 分发消息。
-- **扩展节点（Extension Node）**：接入 SOZO 空间的可插拔设备；它可以提供灯带输出、按钮输入、旋钮输入、传感器输入或这些能力的组合。
-- **节点能力（Node Capability）**：扩展节点声明自己能提供的硬件能力，例如 `LightOutput`、`ButtonInput`、`RotaryInput` 和 `SensorInput`。
-- **SozoBus**：SOZO 自己实现的轻量消息总线，借鉴 ROS 2 的节点、发布/订阅和服务思想；它不是 ROS 2、DDS 或 micro-ROS 运行时。
-- **话题（Topic）**：用于持续状态或事件流的类型化发布/订阅通道，例如空间灯效、节点输入和传感器数据。
-- **服务（Service）**：用于短请求/响应交互的类型化接口，例如配对、能力查询、配置和重启。
-- **灯效命令（Lighting Command）**：用于改变灯效或节点输出状态的、带版本和确认结果的控制请求。
-- **跟随模式（Follow Main）**：灯光节点订阅主空间灯效状态，并在本地渲染同一个场景。
-- **独立模式（Independent）**：灯光节点使用自己的灯效状态；协调器只向指定节点发送独立控制命令。
-- **蓝牙配对（BLE Pairing）**：建立加密的 BLE 链路安全关系；它不等同于把设备加入 SOZO 空间。
-- **节点绑定（Node Binding）**：协调器把已配对的设备登记为某个 SOZO 扩展节点，并保存其能力、配置和空间归属。
+本上下文描述 Flux Hub 的协调边界。共享的空间、节点和灯光词汇以 [SOZO Flux 统一术语](../SOZO-Common/CONTEXT.md) 为准。
+
+## Language
+
+**Hub 运行时（Hub Runtime）**：
+承载协调器、控制入口和能力适配器的组合边界；它不以任何一条灯带作为状态权威。
+
+**本地能力（Local Capability）**：
+与 Hub 部署在同一硬件上、但通过标准能力接口参与空间的能力。
+
+**节点群组（Node Fleet）**：
+已登记到同一空间、由协调器观察和调度的远程节点集合。
+
+**传输适配器（Transport Adapter）**：
+把网页、串口、BLE 或未来控制入口的数据转换为控制命令的边界。
+
+**空间运行快照（Space Runtime Snapshot）**：
+可对外公开的空间场景、网络、音频和节点事实，不包含密码或节点私有硬件配置。

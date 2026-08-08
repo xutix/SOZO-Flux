@@ -99,12 +99,12 @@ function statusWith(profile) {
     },
     layout: {
       profile,
-      activeCount: 308,
+      activeCount: 144,
       maxLedCount: 1024,
-      centerIndex: 153,
-      leftCount: profile === 'segmented' ? 77 : 0,
-      centerCount: profile === 'segmented' ? 154 : 308,
-      rightCount: profile === 'segmented' ? 77 : 0,
+      centerIndex: 71,
+      leftCount: profile === 'segmented' ? 36 : 0,
+      centerCount: profile === 'segmented' ? 72 : 144,
+      rightCount: profile === 'segmented' ? 36 : 0,
       reversed: false,
     },
   };
@@ -382,7 +382,7 @@ test('offers selectable extension lights with separate follow and independent co
     'syncExtensionLighting',
     '/api/node/mode',
     '/api/node/lighting',
-    '同步主灯',
+    '跟随空间场景',
     '独立控制',
   ]) {
     assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
@@ -447,7 +447,7 @@ test('selects the first available light extension and renders mode controls', as
 
   assert.equal(ui.getSelectedExtensionId(), 'c3000042');
   assert.equal(ui.getSelectedExtensionNode().ledCount, 60);
-  assert.match(document.getElementById('extensionControlPanel').html, /同步主灯/);
+  assert.match(document.getElementById('extensionControlPanel').html, /跟随空间场景/);
   assert.match(document.getElementById('extensionControlPanel').html, /独立控制/);
 });
 

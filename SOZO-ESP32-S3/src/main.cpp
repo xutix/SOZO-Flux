@@ -6,12 +6,15 @@
 #include <AudioAnalyzer.h>
 #include <BleFleetAdapter.h>
 #include <CommandRouter.h>
+#include <LightNodeRuntime.h>
 #include <LightingController.h>
+#include <LightingControllerNodeSink.h>
 #include <NetworkManager.h>
 #include <NodeFleetCoordinator.h>
 #include <SerialConsole.h>
 #include <SettingsStore.h>
 #include <S3LightingOutput.h>
+#include <SpaceSceneCoordinator.h>
 #include <SozoDomain.h>
 #include <SozoVersion.h>
 #include <WebApi.h>
@@ -25,6 +28,9 @@ constexpr char kOtaHostname[] = "sozo-flux";
 #ifndef SOZO_OTA_PASSWORD
 #define SOZO_OTA_PASSWORD ""
 #endif
+#ifndef SOZO_LOCAL_LIGHT_ENABLED
+#define SOZO_LOCAL_LIGHT_ENABLED 1
+#endif
 constexpr char kOtaPassword[] = SOZO_OTA_PASSWORD;
 constexpr uint8_t kLedPin = 18;
 constexpr uint8_t kStatusLedPin = 48;
@@ -34,11 +40,16 @@ constexpr uint32_t kSerialReportIntervalMs = 500;
 
 sozo::SettingsStore settingsStore;
 sozo::NetworkManager networkManager(settingsStore);
+sozo::SpaceSceneCoordinator sceneCoordinator;
+#if SOZO_LOCAL_LIGHT_ENABLED
 sozo::s3::S3LightingOutput lightingOutput(spatial_light::kMaxLedCount,
                                           kLedPin);
 sozo::LightingController lightingController(lightingOutput);
+sozo::LightingControllerNodeSink localLightSink(lightingController);
+sozo::LightNodeRuntime localLightNode(localLightSink);
+#endif
 sozo::AudioAnalyzer audioAnalyzer;
-sozo::CommandRouter commandRouter(lightingController, settingsStore);
+sozo::CommandRouter commandRouter(sceneCoordinator, settingsStore);
 sozo::BleFleetAdapter bleNodeTransport;
 sozo::NodeFleetCoordinator nodeCoordinator(bleNodeTransport);
 sozo::SerialConsole serialConsole(Serial, commandRouter);
@@ -51,6 +62,7 @@ sozo::WebApi webApi(commandRouter, networkManager, audioAnalyzer,
                     buildSpatialLightPage, restartDevice);
 
 uint32_t lastSerialReport = 0;
+uint32_t lastLocalLightConfigRevision = 0U;
 bool otaAvailable = false;
 uint8_t lastOtaProgressPercent = 255;
 
@@ -135,11 +147,21 @@ void initStatusLed() {
   statusLed.show();
 }
 
-void initLedStrip() { lightingController.begin(lightingController.state()); }
+void initLocalLightNode() {
+#if SOZO_LOCAL_LIGHT_ENABLED
+  const sozo::PersistedLightingState state = sceneCoordinator.lightingState();
+  const sozo::SpaceSceneSnapshot &scene = sceneCoordinator.snapshot();
+  const uint32_t now = millis();
+  localLightNode.begin(state);
+  localLightNode.applyScene(scene.lighting, scene.revision, now, now);
+  lastLocalLightConfigRevision =
+      sceneCoordinator.localLightConfiguration().revision;
+#endif
+}
 
 void loadConfiguration() {
   const sozo::PersistedLightingState state = settingsStore.loadLightingState();
-  lightingController.setState(state);
+  sceneCoordinator.begin(state);
   audioAnalyzer.setTuning(state.audio);
 }
 
@@ -169,9 +191,14 @@ void printSystemInfo() {
                 static_cast<unsigned long>(ESP.getFreeHeap()));
   Serial.printf("INMP441 analyzer: %s\n",
                 audioAnalyzer.snapshot().frame.available ? "READY" : "ERROR");
-  Serial.printf("WS2812 strip: GPIO%u, active=%u, maximum=%u pixels\n", kLedPin,
-                lightingController.state().layout.activeCount,
+#if SOZO_LOCAL_LIGHT_ENABLED
+  Serial.printf("Local light node: GPIO%u, active=%u, maximum=%u pixels\n",
+                kLedPin,
+                sceneCoordinator.localLightConfiguration().layout.activeCount,
                 spatial_light::kMaxLedCount);
+#else
+  Serial.println(F("Local light node: NOT INSTALLED"));
+#endif
   Serial.printf("Onboard status WS2812: GPIO%u (disabled)\n", kStatusLedPin);
   Serial.printf("SOZO Flux node bus: %u/%u nodes online\n",
                 static_cast<unsigned int>(nodeCoordinator.onlineCount()),
@@ -196,6 +223,8 @@ void printDeviceStatus() {
   const sozo::AudioSnapshot &audio = audioAnalyzer.snapshot();
   const sozo::AudioTuning &tuning = audioAnalyzer.tuning();
   const sozo::NetworkStatus &network = networkManager.status();
+  const sozo::PersistedLightingState lighting =
+      sceneCoordinator.lightingState();
   Serial.println();
   Serial.println(F("---------------- DEVICE STATUS ----------------"));
   Serial.printf("[Wi-Fi] State: %s | Mode: %s | SSID: %s | IP: %s",
@@ -222,12 +251,15 @@ void printDeviceStatus() {
       "Attack: %.0f%% | Release: %.0f%%\n",
       tuning.gain, tuning.noiseFloor, tuning.fullScale, tuning.attack * 100.0F,
       tuning.release * 100.0F);
-  Serial.printf("[LED] Strip: READY | GPIO: %u | Active: %u/%u | Mode: %s | "
-                "Brightness: %u\n",
-                kLedPin, lightingController.state().layout.activeCount,
-                spatial_light::kMaxLedCount,
-                modeName(lightingController.state().mode),
-                lightingController.state().brightness);
+#if SOZO_LOCAL_LIGHT_ENABLED
+  Serial.printf(
+      "[NODE local-light] READY | GPIO: %u | Active: %u/%u | Mode: %s | "
+      "Brightness: %u\n",
+      kLedPin, lighting.layout.activeCount, spatial_light::kMaxLedCount,
+      modeName(lighting.mode), lighting.brightness);
+#else
+  Serial.println(F("[NODE local-light] NOT INSTALLED"));
+#endif
   Serial.printf("[LED] Onboard status LED: DISABLED | GPIO: %u\n",
                 kStatusLedPin);
   Serial.printf("[MEM] Flash: %lu MB | PSRAM: %s, %lu MB | Free heap: %lu "
@@ -246,14 +278,15 @@ void printRuntimeStatus() {
   if (now - lastSerialReport < kSerialReportIntervalMs) return;
   lastSerialReport = now;
   const sozo::AudioSnapshot &audio = audioAnalyzer.snapshot();
+  const sozo::SpaceSceneSnapshot &scene = sceneCoordinator.snapshot();
   Serial.printf(
       "[LIVE] MIC=%s Frames=%lu | Mode=%s | Volume=%.1f | Beat=%.1f | "
       "RMS=%.1f | Brightness=%u | FreeHeap=%lu bytes\n",
       audio.frame.available ? "READY" : "ERROR",
       static_cast<unsigned long>(audio.frame.framesRead),
-      modeName(lightingController.state().mode), audio.frame.volume,
+      modeName(scene.lighting.mode), audio.frame.volume,
       audio.frame.beatPulse, audio.selectedRawRms,
-      lightingController.state().brightness,
+      scene.lighting.brightness,
       static_cast<unsigned long>(ESP.getFreeHeap()));
 }
 
@@ -265,14 +298,19 @@ void setup() {
 
   loadConfiguration();
   Serial.printf("[BOOT] Loaded saved mode: %s\n",
-                modeName(lightingController.state().mode));
+                modeName(sceneCoordinator.snapshot().lighting.mode));
   initStatusLed();
   Serial.println(F("[BOOT] Onboard GPIO48 WS2812 disabled."));
-  initLedStrip();
-  Serial.printf("[BOOT] WS2812 strip initialized: GPIO%u, %u pixels, "
+  initLocalLightNode();
+#if SOZO_LOCAL_LIGHT_ENABLED
+  Serial.printf("[BOOT] Local light node initialized: GPIO%u, %u pixels, "
                 "brightness %u.\n",
-                kLedPin, lightingController.state().layout.activeCount,
-                lightingController.state().brightness);
+                kLedPin,
+                sceneCoordinator.localLightConfiguration().layout.activeCount,
+                sceneCoordinator.snapshot().lighting.brightness);
+#else
+  Serial.println(F("[BOOT] Local light node not installed."));
+#endif
   const bool micAvailable = audioAnalyzer.begin();
   Serial.printf("[BOOT] INMP441 I2S initialization: %s\n",
                 micAvailable ? "SUCCESS" : "FAILED");
@@ -291,15 +329,27 @@ void setup() {
 }
 
 void loop() {
+  const uint32_t now = millis();
   handleOta();
   serialConsole.tick();
   webApi.handleClient();
   saveConfigurationIfReady();
   audioAnalyzer.tick();
-  lightingController.tick(millis(), audioAnalyzer.snapshot().frame);
-  nodeCoordinator.tick(millis(), lightingController.state(),
-                       lightingController.snapshot(),
-                       audioAnalyzer.snapshot().frame);
+  const sozo::AudioFrame &audio = audioAnalyzer.snapshot().frame;
+  const sozo::SpaceSceneSnapshot &scene = sceneCoordinator.snapshot();
+#if SOZO_LOCAL_LIGHT_ENABLED
+  const sozo::LocalLightConfiguration &configuration =
+      sceneCoordinator.localLightConfiguration();
+  if (configuration.revision != lastLocalLightConfigRevision) {
+    localLightNode.updateLocalConfiguration(
+        configuration, sceneCoordinator.lightingState().audio);
+    lastLocalLightConfigRevision = configuration.revision;
+  }
+  localLightNode.applyScene(scene.lighting, scene.revision, now, now);
+  localLightNode.applyAudioFrame(audio, audio.framesRead);
+  localLightNode.tick(now);
+#endif
+  nodeCoordinator.tick(now, scene, audio);
   networkManager.tick();
   printRuntimeStatus();
   delay(1);

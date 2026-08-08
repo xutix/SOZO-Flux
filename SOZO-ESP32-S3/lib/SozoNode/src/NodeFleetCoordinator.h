@@ -17,8 +17,7 @@ class NodeFleetCoordinator {
   ~NodeFleetCoordinator();
 
   bool begin();
-  void tick(uint32_t nowMs, const PersistedLightingState &lightingState,
-            const LightingSnapshot &lightingRuntime,
+  void tick(uint32_t nowMs, const SpaceSceneSnapshot &scene,
             const AudioFrame &audioFrame);
 
   const NodeRegistry &registry() const;

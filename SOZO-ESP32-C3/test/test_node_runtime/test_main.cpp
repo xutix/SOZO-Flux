@@ -7,6 +7,8 @@
 #include <NodeFirmwareReceiver.h>
 #include <NodeLedCountPort.h>
 #include <NodeSceneRuntime.h>
+
+#include <initializer_list>
 #include <PairingWindow.h>
 #include "../../../SOZO-Common/test/TestHarness.h"
 
@@ -415,7 +417,7 @@ void test_independent_scene_isolated_from_follow_scene_until_follow_is_restored(
   follow.primaryRed = 10U;
   CHECK_EQ(sozo::c3::SceneApplyResult::Applied,
            runtime.applyScene(follow, 4U, 100U, 50U,
-                              sozo::c3::SceneTarget::FollowMain));
+                              sozo::c3::SceneTarget::FollowSpace));
   CHECK_EQ(10U, sink.state_.primaryColor.red);
 
   CHECK_TRUE(runtime.setControlMode(sozo::node::NodeControlMode::Independent));
@@ -430,7 +432,7 @@ void test_independent_scene_isolated_from_follow_scene_until_follow_is_restored(
   newerFollow.primaryRed = 23U;
   CHECK_EQ(sozo::c3::SceneApplyResult::Applied,
            runtime.applyScene(newerFollow, 5U, 120U, 70U,
-                              sozo::c3::SceneTarget::FollowMain));
+                              sozo::c3::SceneTarget::FollowSpace));
   CHECK_EQ(88U, sink.state_.primaryColor.red);
 
   CHECK_TRUE(runtime.setControlMode(sozo::node::NodeControlMode::FollowMain));
@@ -763,6 +765,47 @@ void test_node_application_keeps_transport_and_rendering_separate() {
   CHECK_EQ(60U, status.ledCount);
 }
 
+void test_failed_control_mode_persistence_restores_follow_output() {
+  FakeLightingSink sink(sozo::makeDefaultPersistedLightingState());
+  FakeButtonInput button;
+  FakeDiagnostics diagnostics;
+  FakeBindingRepository bindings;
+  FakeNodeControlRepository controls;
+  controls.state.controlMode = sozo::node::NodeControlMode::FollowMain;
+  controls.state.hasIndependentScene = true;
+  controls.state.independentState = sozo::makeDefaultPersistedLightingState();
+  controls.state.independentState.primaryColor = {88U, 77U, 66U};
+  controls.state.independentRevision = 3U;
+  controls.saveSucceeds = false;
+  FakeNodeLedCountRepository ledCounts;
+  FakeNodeTransport transport;
+  sozo::c3::PairingWindow pairing(1500U, 60000U);
+  const sozo::c3::C3NodeProfile profile{60U, 512U, 1U};
+  sozo::c3::C3NodeApplication app(sink, button, diagnostics, pairing,
+                                   transport, bindings, controls, ledCounts,
+                                   profile);
+  CHECK_TRUE(app.begin(0xC3000042U, 0U));
+  CHECK_EQ(255U, sink.state_.primaryColor.red);
+
+  sozo::node::ControlModePayload payload{};
+  payload.controlMode = sozo::node::NodeControlMode::Independent;
+  sozo::node::Envelope request{};
+  request.flags = sozo::node::kFlagRequiresAck;
+  request.sourceNodeId = sozo::node::kCoordinatorNodeId;
+  request.correlationId = 81U;
+  CHECK_EQ(sozo::node::CodecResult::Ok,
+           sozo::node::writeControlModeRequest(request, payload));
+  transport.queueInbound(request);
+  app.tick(10U);
+
+  sozo::node::CommandReceiptPayload receipt{};
+  CHECK_EQ(sozo::node::CodecResult::Ok,
+           sozo::node::readCommandReceipt(transport.sent[0], receipt));
+  CHECK_TRUE(!receipt.accepted);
+  CHECK_EQ(5U, receipt.errorCode);
+  CHECK_EQ(255U, sink.state_.primaryColor.red);
+}
+
 void test_node_led_count_is_saved_locally_and_survives_scene_commands() {
   FakeLightingSink sink(sozo::makeDefaultPersistedLightingState());
   FakeButtonInput button;
@@ -849,6 +892,7 @@ int runNodeRuntimeTests() {
   test_short_press_does_not_open_pairing();
   test_continuous_eight_second_hold_requests_binding_reset();
   test_node_application_keeps_transport_and_rendering_separate();
+  test_failed_control_mode_persistence_restores_follow_output();
   test_node_led_count_is_saved_locally_and_survives_scene_commands();
   return sozo::test::finish("C3 node runtime tests");
 }

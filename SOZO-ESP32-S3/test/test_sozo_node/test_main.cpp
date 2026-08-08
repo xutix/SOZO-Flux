@@ -1,4 +1,5 @@
 #include <SceneMessageMapper.h>
+#include <LightingController.h>
 #include <NodeRegistry.h>
 #include <NodeCoordinator.h>
 #include <NodeFleetCoordinator.h>
@@ -105,6 +106,13 @@ class FakeNodeFleetTransport final : public sozo::NodeFleetTransport {
   bool pairingOpen{false};
 };
 
+sozo::SpaceSceneSnapshot makeSpaceScene(
+    const sozo::PersistedLightingState &state,
+    const sozo::LightingSnapshot &runtime, const uint32_t revision = 1U) {
+  return {sozo::makeLightingScene(state, runtime.manualLitPixelCount),
+          revision};
+}
+
 sozo::node::Envelope makeFirmwareStatusResponse(
     const sozo::node::Envelope &request,
     const sozo::node::FirmwareUpdateState state, const uint32_t nextOffset,
@@ -197,7 +205,7 @@ void test_fleet_allows_only_one_c3_firmware_update_at_a_time() {
   const sozo::LightingSnapshot runtime{state.mode, state.layout.activeCount,
                                        false, -1};
   const sozo::AudioFrame audio{};
-  fleet.tick(100U, state, runtime, audio);
+  fleet.tick(100U, makeSpaceScene(state, runtime), audio);
 
   const uint8_t image[]{1U, 2U};
   uint8_t sha256[32]{};
@@ -242,8 +250,8 @@ void test_maps_every_runtime_effect_parameter() {
   const sozo::LightingSnapshot runtime{
       sozo::EffectMode::BassRipple, 500, false, 321};
 
-  const sozo::node::SceneSnapshotPayload scene =
-      sozo::makeSceneSnapshot(state, runtime);
+  const sozo::node::SceneSnapshotPayload scene = sozo::makeSceneSnapshot(
+      sozo::makeLightingScene(state, runtime.manualLitPixelCount));
 
   CHECK_EQ(static_cast<uint8_t>(state.mode), scene.effectMode);
   CHECK_EQ(state.brightness, scene.brightness);
@@ -272,8 +280,9 @@ void test_maps_every_runtime_effect_parameter() {
   CHECK_EQ(state.audioColorStyle, scene.audioColorStyle);
   CHECK_EQ(state.cometColorStyle, scene.cometColorStyle);
   CHECK_EQ(runtime.manualLitPixelCount, scene.manualLitPixelCount);
-  CHECK_EQ(static_cast<uint8_t>(state.layout.profile), scene.spatialProfile);
-  CHECK_EQ(sozo::node::kSpatialFlagReversed, scene.spatialFlags);
+  CHECK_EQ(static_cast<uint8_t>(spatial_light::LayoutProfile::Continuous),
+           scene.spatialProfile);
+  CHECK_EQ(0U, scene.spatialFlags);
 }
 
 void test_scene_does_not_grow_with_physical_led_count() {
@@ -284,8 +293,10 @@ void test_scene_does_not_grow_with_physical_led_count() {
   const sozo::LightingSnapshot runtime{sozo::EffectMode::Static, 30, false,
                                        -1};
 
-  const auto shortScene = sozo::makeSceneSnapshot(shortStrip, runtime);
-  const auto longScene = sozo::makeSceneSnapshot(longStrip, runtime);
+  const auto shortScene = sozo::makeSceneSnapshot(
+      sozo::makeLightingScene(shortStrip, runtime.manualLitPixelCount));
+  const auto longScene = sozo::makeSceneSnapshot(
+      sozo::makeLightingScene(longStrip, runtime.manualLitPixelCount));
   CHECK_EQ(sizeof(shortScene), sizeof(longScene));
   CHECK_EQ(sozo::node::kSceneSnapshotWireBytes, 30);
 }
@@ -325,7 +336,7 @@ void test_coordinator_streams_audio_for_every_audio_effect() {
     state.mode = mode;
     const sozo::LightingSnapshot runtime{mode, state.layout.activeCount, false,
                                          -1};
-    coordinator.tick(100U, state, runtime, audio);
+    coordinator.tick(100U, makeSpaceScene(state, runtime), audio);
 
     CHECK_EQ(2U, transport.sentCount);
     CHECK_EQ(sozo::node::MessageType::SceneSnapshot,
@@ -354,7 +365,7 @@ void test_coordinator_streams_audio_for_every_audio_effect() {
   state.mode = sozo::EffectMode::Rainbow;
   const sozo::LightingSnapshot runtime{state.mode, state.layout.activeCount,
                                        false, -1};
-  coordinator.tick(100U, state, runtime, audio);
+  coordinator.tick(100U, makeSpaceScene(state, runtime), audio);
   CHECK_EQ(1U, transport.sentCount);
   CHECK_EQ(sozo::node::MessageType::SceneSnapshot,
            transport.sent[0].messageType);
@@ -364,7 +375,8 @@ void test_scene_equality_compares_render_intent() {
   sozo::PersistedLightingState state{};
   const sozo::LightingSnapshot runtime{state.mode, state.layout.activeCount,
                                        false, -1};
-  auto first = sozo::makeSceneSnapshot(state, runtime);
+  auto first = sozo::makeSceneSnapshot(
+      sozo::makeLightingScene(state, runtime.manualLitPixelCount));
   auto second = first;
   CHECK_TRUE(sozo::sameSceneSnapshot(first, second));
   second.flowSpeed++;
@@ -594,7 +606,7 @@ void test_coordinator_depends_on_transport_contract_not_ble_concrete_type() {
       sozo::makeDefaultPersistedLightingState();
   const sozo::LightingSnapshot runtime{state.mode, state.layout.activeCount,
                                        false, -1};
-  coordinator.tick(1000U, state, runtime, {});
+  coordinator.tick(1000U, makeSpaceScene(state, runtime), {});
   CHECK_EQ(1U, transport.sentCount);
   CHECK_EQ(sozo::node::MessageType::BindRequest,
            transport.sent[0].messageType);
@@ -616,7 +628,7 @@ void test_coordinator_depends_on_transport_contract_not_ble_concrete_type() {
   sozo::node::writeBindResult(response, result);
   transport.queueInbound(response);
 
-  coordinator.tick(1001U, state, runtime, {});
+  coordinator.tick(1001U, makeSpaceScene(state, runtime), {});
   CHECK_TRUE(coordinator.nodeReady());
   CHECK_EQ(2U, transport.sentCount);
   CHECK_EQ(sozo::node::MessageType::SceneSnapshot,
@@ -635,7 +647,7 @@ void test_coordinator_depends_on_transport_contract_not_ble_concrete_type() {
   CHECK_EQ(sozo::node::CodecResult::Ok,
            sozo::node::writeCommandReceipt(sceneResponse, receipt));
   transport.queueInbound(sceneResponse);
-  coordinator.tick(1002U, state, runtime, {});
+  coordinator.tick(1002U, makeSpaceScene(state, runtime), {});
   const sozo::NodeRecord *record = coordinator.registry().find(transport.remoteId);
   CHECK_TRUE(record != nullptr);
   CHECK_EQ(transport.sent[1].sceneRevision, record->lastAppliedSceneRevision);
@@ -657,13 +669,13 @@ void test_coordinator_depends_on_transport_contract_not_ble_concrete_type() {
   CHECK_EQ(sozo::node::CodecResult::Ok,
            sozo::node::writeStatusSnapshot(statusResponse, status));
   transport.queueInbound(statusResponse);
-  coordinator.tick(1003U, state, runtime, {});
+  coordinator.tick(1003U, makeSpaceScene(state, runtime), {});
   record = coordinator.registry().find(transport.remoteId);
   CHECK_EQ(45678U, record->status.freeHeapBytes);
   CHECK_EQ(1003U, record->lastStatusMs);
 
   transport.isReady = false;
-  coordinator.tick(1004U, state, runtime, {});
+  coordinator.tick(1004U, makeSpaceScene(state, runtime), {});
   CHECK_EQ(sozo::NodeConnectionState::Offline,
            coordinator.registry().find(transport.remoteId)->connectionState);
 }
@@ -679,7 +691,7 @@ void test_coordinator_routes_independent_scene_and_mode_to_selected_light_node()
       sozo::makeDefaultPersistedLightingState();
   const sozo::LightingSnapshot runtime{mainState.mode,
                                        mainState.layout.activeCount, false, -1};
-  coordinator.tick(100U, mainState, runtime, {});
+  coordinator.tick(100U, makeSpaceScene(mainState, runtime), {});
 
   CHECK_TRUE(coordinator.requestNodeControlMode(
       transport.remoteId, sozo::node::NodeControlMode::Independent, 101U));
@@ -695,7 +707,7 @@ void test_coordinator_routes_independent_scene_and_mode_to_selected_light_node()
   CHECK_EQ(sozo::node::CodecResult::Ok,
            sozo::node::writeStatusSnapshot(statusResponse, status));
   transport.queueInbound(statusResponse);
-  coordinator.tick(102U, mainState, runtime, {});
+  coordinator.tick(102U, makeSpaceScene(mainState, runtime), {});
 
   auto independent = mainState;
   independent.mode = sozo::EffectMode::Rainbow;
@@ -721,7 +733,7 @@ void test_independent_scene_requires_node_confirmation_of_independent_mode() {
       sozo::makeDefaultPersistedLightingState();
   const sozo::LightingSnapshot runtime{state.mode, state.layout.activeCount,
                                        false, -1};
-  coordinator.tick(100U, state, runtime, {});
+  coordinator.tick(100U, makeSpaceScene(state, runtime), {});
 
   CHECK_TRUE(!coordinator.requestIndependentScene(transport.remoteId, state,
                                                    101U));
@@ -734,7 +746,7 @@ void test_independent_scene_requires_node_confirmation_of_independent_mode() {
   CHECK_EQ(sozo::node::CodecResult::Ok,
            sozo::node::writeStatusSnapshot(statusResponse, status));
   transport.queueInbound(statusResponse);
-  coordinator.tick(102U, state, runtime, {});
+  coordinator.tick(102U, makeSpaceScene(state, runtime), {});
 
   CHECK_TRUE(
       coordinator.requestIndependentScene(transport.remoteId, state, 103U));
@@ -753,7 +765,7 @@ void test_coordinator_forwards_led_count_and_refreshes_confirmed_value() {
   const sozo::LightingSnapshot runtime{state.mode, state.layout.activeCount,
                                        false, -1};
 
-  coordinator.tick(100U, state, runtime, {});
+  coordinator.tick(100U, makeSpaceScene(state, runtime), {});
   CHECK_EQ(sozo::node::MessageType::SceneSnapshot, transport.sent[0].messageType);
 
   sozo::node::CommandReceiptPayload sceneReceipt{};
@@ -766,7 +778,7 @@ void test_coordinator_forwards_led_count_and_refreshes_confirmed_value() {
   CHECK_EQ(sozo::node::CodecResult::Ok,
            sozo::node::writeCommandReceipt(sceneResponse, sceneReceipt));
   transport.queueInbound(sceneResponse);
-  coordinator.tick(101U, state, runtime, {});
+  coordinator.tick(101U, makeSpaceScene(state, runtime), {});
 
   sozo::node::StatusSnapshotPayload initialStatus{};
   initialStatus.ledCount = 60U;
@@ -778,7 +790,7 @@ void test_coordinator_forwards_led_count_and_refreshes_confirmed_value() {
            sozo::node::writeStatusSnapshot(initialStatusResponse,
                                             initialStatus));
   transport.queueInbound(initialStatusResponse);
-  coordinator.tick(102U, state, runtime, {});
+  coordinator.tick(102U, makeSpaceScene(state, runtime), {});
 
   CHECK_TRUE(coordinator.requestNodeLedCount(transport.remoteId, 58U, 103U));
   CHECK_EQ(sozo::node::MessageType::LedCountRequest,
@@ -799,7 +811,7 @@ void test_coordinator_forwards_led_count_and_refreshes_confirmed_value() {
   CHECK_EQ(sozo::node::CodecResult::Ok,
            sozo::node::writeCommandReceipt(countResponse, countReceipt));
   transport.queueInbound(countResponse);
-  coordinator.tick(104U, state, runtime, {});
+  coordinator.tick(104U, makeSpaceScene(state, runtime), {});
   CHECK_EQ(sozo::node::MessageType::StatusRequest,
            transport.sent[3].messageType);
 
@@ -813,13 +825,13 @@ void test_coordinator_forwards_led_count_and_refreshes_confirmed_value() {
            sozo::node::writeStatusSnapshot(updatedStatusResponse,
                                             updatedStatus));
   transport.queueInbound(updatedStatusResponse);
-  coordinator.tick(105U, state, runtime, {});
+  coordinator.tick(105U, makeSpaceScene(state, runtime), {});
   const sozo::NodeRecord *record = coordinator.registry().find(transport.remoteId);
   CHECK_TRUE(record != nullptr);
   CHECK_EQ(58U, record->status.ledCount);
 }
 
-void test_fleet_sends_the_main_scene_to_every_ready_light_node() {
+void test_fleet_sends_the_space_scene_to_every_ready_light_node() {
   FakeNodeFleetTransport transport;
   sozo::NodeFleetCoordinator fleet(transport);
   CHECK_TRUE(fleet.begin());
@@ -828,7 +840,7 @@ void test_fleet_sends_the_main_scene_to_every_ready_light_node() {
       sozo::makeDefaultPersistedLightingState();
   const sozo::LightingSnapshot runtime{state.mode, state.layout.activeCount,
                                        false, -1};
-  fleet.tick(100U, state, runtime, {});
+  fleet.tick(100U, makeSpaceScene(state, runtime), {});
 
   CHECK_TRUE(transport.began);
   CHECK_EQ(2U, fleet.onlineCount());
@@ -856,14 +868,14 @@ void test_fleet_only_binds_an_unknown_node_during_explicit_pairing() {
       sozo::makeDefaultPersistedLightingState();
   const sozo::LightingSnapshot runtime{state.mode, state.layout.activeCount,
                                        false, -1};
-  fleet.tick(100U, state, runtime, {});
+  fleet.tick(100U, makeSpaceScene(state, runtime), {});
   CHECK_EQ(0U, transport.links[0].sentCount);
   CHECK_EQ(0U, fleet.registry().size());
 
   CHECK_TRUE(fleet.openPairingWindow(101U));
   transport.links[0].isReady = true;
   ++transport.links[0].generation;
-  fleet.tick(102U, state, runtime, {});
+  fleet.tick(102U, makeSpaceScene(state, runtime), {});
   CHECK_EQ(1U, transport.links[0].sentCount);
   CHECK_EQ(sozo::node::MessageType::BindRequest,
            transport.links[0].sent[0].messageType);
@@ -879,7 +891,7 @@ void test_fleet_routes_a_device_command_only_to_the_selected_node() {
       sozo::makeDefaultPersistedLightingState();
   const sozo::LightingSnapshot runtime{state.mode, state.layout.activeCount,
                                        false, -1};
-  fleet.tick(100U, state, runtime, {});
+  fleet.tick(100U, makeSpaceScene(state, runtime), {});
 
   CHECK_TRUE(fleet.requestNodeControlMode(
       transport.links[1].remoteId,
@@ -919,7 +931,7 @@ int runNodeTests() {
   test_coordinator_routes_independent_scene_and_mode_to_selected_light_node();
   test_independent_scene_requires_node_confirmation_of_independent_mode();
   test_coordinator_forwards_led_count_and_refreshes_confirmed_value();
-  test_fleet_sends_the_main_scene_to_every_ready_light_node();
+  test_fleet_sends_the_space_scene_to_every_ready_light_node();
   test_fleet_only_binds_an_unknown_node_during_explicit_pairing();
   test_fleet_routes_a_device_command_only_to_the_selected_node();
   return sozo::test::finish("scene mapper tests");

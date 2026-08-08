@@ -17,6 +17,8 @@ COMMON_INCLUDES = [
     "SOZO-Common/lib/SozoDomain/src",
     "SOZO-Common/lib/SozoLightingCore/src",
     "SOZO-Common/lib/SozoNodeProtocol/src",
+    "SOZO-Common/lib/SozoSceneCore/src",
+    "SOZO-Common/lib/SozoVersion/src",
     "SOZO-Common/lib/SpatialLightCore/src",
 ]
 
@@ -25,6 +27,8 @@ COMMON_SOURCES = [
     "SOZO-Common/lib/SozoDomain/src/SozoDomain.cpp",
     "SOZO-Common/lib/SozoNodeProtocol/src/SozoNodeMessages.cpp",
     "SOZO-Common/lib/SozoNodeProtocol/src/SozoNodeProtocol.cpp",
+    "SOZO-Common/lib/SozoSceneCore/src/LightNodeRuntime.cpp",
+    "SOZO-Common/lib/SozoSceneCore/src/SpaceSceneCoordinator.cpp",
     "SOZO-Common/lib/SpatialLightCore/src/SpatialLightCore.cpp",
 ]
 
@@ -37,6 +41,7 @@ TARGETS = {
         "sources": [
             "SOZO-ESP32-S3/test/test_sozo_node/test_main.cpp",
             "SOZO-ESP32-S3/lib/SozoNode/src/NodeCoordinator.cpp",
+            "SOZO-ESP32-S3/lib/SozoNode/src/NodeFirmwareTransfer.cpp",
             "SOZO-ESP32-S3/lib/SozoNode/src/NodeFleetCoordinator.cpp",
             "SOZO-ESP32-S3/lib/SozoNode/src/NodeRegistry.cpp",
             "SOZO-ESP32-S3/lib/SozoNode/src/SceneMessageMapper.cpp",
@@ -51,6 +56,7 @@ TARGETS = {
             "SOZO-ESP32-C3/test/test_node_runtime/test_main.cpp",
             "SOZO-ESP32-C3/lib/SozoC3Node/src/C3NodeApplication.cpp",
             "SOZO-ESP32-C3/lib/SozoC3Node/src/NodeSceneRuntime.cpp",
+            "SOZO-ESP32-C3/lib/SozoC3Node/src/NodeFirmwareReceiver.cpp",
             "SOZO-ESP32-C3/lib/SozoC3Node/src/PairingWindow.cpp",
         ],
     },

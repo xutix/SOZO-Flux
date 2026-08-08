@@ -1,6 +1,6 @@
 # SOZO Flux Gateway S3
 
-本工程基于 PlatformIO 与 Arduino framework，适配 ESP32-S3-WROOM-1-N8R8（8MB Flash、8MB OPI PSRAM），支持 INMP441 拾音、默认 144 颗且可在网页空间布局中调整的 WS2812 灯带、手机网页控制和音乐律动。
+本工程基于 PlatformIO 与 Arduino framework，适配 ESP32-S3-WROOM-1-N8R8（8MB Flash、8MB OPI PSRAM）。它作为 Flux Hub 维护权威空间场景，并支持 INMP441 拾音、手机网页控制、音乐律动和一个默认 144 颗且可在网页空间布局中调整的可选本地 WS2812 灯光节点。
 
 ## 接线
 
@@ -116,7 +116,9 @@ upload_speed = 460800
 - 拾音：显示拾音颜色样式、鼓点灵敏度、冲击强度；选择静态颜色样式时显示颜色轮盘。
 - 流星：显示流星颜色样式；选择静态颜色样式时显示颜色轮盘。
 
-主灯默认使用 144 颗灯珠，可通过网页的“空间布局”调整；所有灯效按当前保存的活动灯珠数量计算。
+本地灯光节点默认使用 144 颗灯珠，可通过网页的“空间布局”调整；所有灯效按该节点当前保存的活动灯珠数量计算。
+
+不带本地灯带的 Hub 可使用 `esp32-s3-hub-only` 环境构建；协调器、网页、音频和远程节点管理仍正常运行。
 
 ## 断电记忆与开机动画
 
@@ -205,15 +207,18 @@ board_build.psram_type = opi
 
 ## Extensible control architecture
 
-The firmware has one authoritative lighting state and one command path. A
+The firmware has one authoritative space scene and one command path. A
 transport adapter must create a `ControlCommand` and send it to
-`CommandRouter`; adapters must not write LED state or NVS directly.
+`CommandRouter`; adapters must not write LED state or NVS directly. The S3
+strip is an optional local light node and consumes the same scene contract as
+a remote C3 node.
 
 | Responsibility | Module |
 |---|---|
 | Control vocabulary, sources, validation and persisted state | `lib/SozoDomain` |
+| Authoritative space scene and shared light-node runtime | `../SOZO-Common/lib/SozoSceneCore` |
 | Shared LED effects and spatial rendering | `../SOZO-Common/lib/SozoLightingCore` |
-| S3 NeoPixel strip output | `lib/SozoLightingAdapter` |
+| Optional S3 local-node NeoPixel output | `lib/SozoLightingAdapter` |
 | Microphone sampling and audio frame analysis | `lib/SozoAudio` |
 | Command authorization and delayed persistence | `lib/SozoControl` |
 | Router Wi-Fi, mDNS and provisioning AP | `lib/SozoNetwork` |

@@ -41,28 +41,4 @@ void C3LightingOutput::present(const lighting::LedGeometry &geometry,
   strip_.show();
 }
 
-LightingControllerSink::LightingControllerSink(LightingController &controller)
-    : controller_(controller) {}
-
-void LightingControllerSink::begin(const PersistedLightingState &state) {
-  controller_.begin(state);
-}
-
-const PersistedLightingState &LightingControllerSink::state() const {
-  return controller_.state();
-}
-
-void LightingControllerSink::applyState(const PersistedLightingState &state) {
-  controller_.setState(state);
-}
-
-void LightingControllerSink::setLitPixelCount(const uint16_t count) {
-  controller_.setLitPixelCount(count);
-}
-
-void LightingControllerSink::tick(const uint32_t now,
-                                  const AudioFrame &audio) {
-  controller_.tick(now, audio);
-}
-
 }  // namespace sozo::c3

@@ -14,38 +14,37 @@ uint16_t toFixed100(const float value) {
 
 }  // namespace
 
-node::SceneSnapshotPayload makeSceneSnapshot(
-    const PersistedLightingState &state, const LightingSnapshot &runtime) {
-  node::SceneSnapshotPayload scene{};
-  scene.effectMode = static_cast<uint8_t>(state.mode);
-  scene.brightness = state.brightness;
-  scene.primaryRed = state.primaryColor.red;
-  scene.primaryGreen = state.primaryColor.green;
-  scene.primaryBlue = state.primaryColor.blue;
-  scene.rainbowStyle = state.lighting.rainbowStyle;
-  scene.flowSpeed = state.lighting.flowSpeed;
-  scene.cometTail = state.lighting.cometTail;
-  scene.cometSpeed = state.lighting.cometSpeed;
-  scene.cometDensity = state.lighting.cometDensity;
-  scene.cometBackground = state.lighting.cometBackground;
-  scene.cometRandom = state.lighting.cometRandom;
-  scene.audioSensitivityX100 = state.lighting.audioSensitivityX100;
-  scene.audioColorGainX100 = state.lighting.audioColorGainX100;
-  scene.audioHueDrive = state.lighting.audioHueDrive;
-  scene.breathFloorPercent = state.lighting.breathFloorPercent;
-  scene.secondaryRed = state.lighting.secondaryRed;
-  scene.secondaryGreen = state.lighting.secondaryGreen;
-  scene.secondaryBlue = state.lighting.secondaryBlue;
-  scene.pulseAmplitudePercent = state.lighting.pulseAmplitudePercent;
-  scene.pulseHeightPercent = state.lighting.pulseHeightPercent;
-  scene.animationBrightness = state.lighting.animationBrightness;
-  scene.audioColorStyle = state.audioColorStyle;
-  scene.cometColorStyle = state.cometColorStyle;
-  scene.manualLitPixelCount = runtime.manualLitPixelCount;
-  scene.spatialProfile = static_cast<uint8_t>(state.layout.profile);
-  scene.spatialFlags =
-      state.layout.reversed ? node::kSpatialFlagReversed : 0U;
-  return scene;
+node::SceneSnapshotPayload makeSceneSnapshot(const LightingScene &lighting) {
+  node::SceneSnapshotPayload payload{};
+  payload.effectMode = static_cast<uint8_t>(lighting.mode);
+  payload.brightness = lighting.brightness;
+  payload.primaryRed = lighting.primaryColor.red;
+  payload.primaryGreen = lighting.primaryColor.green;
+  payload.primaryBlue = lighting.primaryColor.blue;
+  payload.rainbowStyle = lighting.settings.rainbowStyle;
+  payload.flowSpeed = lighting.settings.flowSpeed;
+  payload.cometTail = lighting.settings.cometTail;
+  payload.cometSpeed = lighting.settings.cometSpeed;
+  payload.cometDensity = lighting.settings.cometDensity;
+  payload.cometBackground = lighting.settings.cometBackground;
+  payload.cometRandom = lighting.settings.cometRandom;
+  payload.audioSensitivityX100 = lighting.settings.audioSensitivityX100;
+  payload.audioColorGainX100 = lighting.settings.audioColorGainX100;
+  payload.audioHueDrive = lighting.settings.audioHueDrive;
+  payload.breathFloorPercent = lighting.settings.breathFloorPercent;
+  payload.secondaryRed = lighting.settings.secondaryRed;
+  payload.secondaryGreen = lighting.settings.secondaryGreen;
+  payload.secondaryBlue = lighting.settings.secondaryBlue;
+  payload.pulseAmplitudePercent = lighting.settings.pulseAmplitudePercent;
+  payload.pulseHeightPercent = lighting.settings.pulseHeightPercent;
+  payload.animationBrightness = lighting.settings.animationBrightness;
+  payload.audioColorStyle = lighting.audioColorStyle;
+  payload.cometColorStyle = lighting.cometColorStyle;
+  payload.manualLitPixelCount = lighting.manualLitPixelCount;
+  payload.spatialProfile =
+      static_cast<uint8_t>(spatial_light::LayoutProfile::Continuous);
+  payload.spatialFlags = 0U;
+  return payload;
 }
 
 node::AudioFeaturesPayload makeAudioFeatures(const AudioFrame &frame) {

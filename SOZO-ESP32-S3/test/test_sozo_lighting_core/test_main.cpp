@@ -6,9 +6,9 @@ static_assert(sozo::scaleRgb({200, 100, 50}, 0).red == 0,
               "zero scaling must turn the red channel off");
 static_assert(sozo::scaleRgb({200, 100, 50}, 255).green == 100,
               "full scaling must retain each channel");
-static_assert(sozo::resolvePhysicalIndex(0, 308, false) == 0,
+static_assert(sozo::resolvePhysicalIndex(0, 144, false) == 0,
               "a normal layout must start at the first physical pixel");
-static_assert(sozo::resolvePhysicalIndex(0, 308, true) == 307,
+static_assert(sozo::resolvePhysicalIndex(0, 144, true) == 143,
               "a reversed layout must start at the last physical pixel");
 
 static_assert(sozo::rainbowCycleCount(0) == 1,

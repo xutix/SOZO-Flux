@@ -8,7 +8,7 @@ test('release manifest separates platform, firmware, node, and protocol versions
   const manifest = await read('VERSION');
   assert.match(manifest, /^platform=0\.1\.0-alpha$/m);
   assert.match(manifest, /^gateway_s3=0\.1\.0-alpha$/m);
-  assert.match(manifest, /^node_c3=0\.1\.0-alpha$/m);
+  assert.match(manifest, /^node_c3=0\.2\.1-alpha$/m);
   assert.match(manifest, /^protocol=1$/m);
 
   const versionHeader = await read(
@@ -16,7 +16,7 @@ test('release manifest separates platform, firmware, node, and protocol versions
   );
   assert.match(versionHeader, /kPlatform\[\] = "0\.1\.0-alpha"/);
   assert.match(versionHeader, /kGatewayS3\[\] = "0\.1\.0-alpha"/);
-  assert.match(versionHeader, /kNodeC3\[\] = "0\.1\.0-alpha"/);
+  assert.match(versionHeader, /kNodeC3\[\] = "0\.2\.1-alpha"/);
 
   const protocolHeader = await read(
     'SOZO-Common/lib/SozoNodeProtocol/src/SozoNodeProtocol.h',

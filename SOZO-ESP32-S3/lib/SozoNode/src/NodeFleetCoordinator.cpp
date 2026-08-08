@@ -30,14 +30,14 @@ bool NodeFleetCoordinator::begin() {
 }
 
 void NodeFleetCoordinator::tick(
-    const uint32_t nowMs, const PersistedLightingState &lightingState,
-    const LightingSnapshot &lightingRuntime, const AudioFrame &audioFrame) {
+    const uint32_t nowMs, const SpaceSceneSnapshot &scene,
+    const AudioFrame &audioFrame) {
   transport_.tick(nowMs);
   const bool pairingAllowed = transport_.pairingWindowOpen(nowMs);
   for (size_t index = 0; index < sessionCount_; ++index) {
     if (sessions_[index] != nullptr) {
       sessions_[index]->setBindingAllowed(pairingAllowed);
-      sessions_[index]->tick(nowMs, lightingState, lightingRuntime, audioFrame);
+      sessions_[index]->tick(nowMs, scene, audioFrame);
       const NodeTransport *link = transport_.linkAt(index);
       if (link != nullptr && link->ready() && !link->capabilities().bound &&
           !pairingAllowed && sessions_[index]->activeNodeId() != 0U) {

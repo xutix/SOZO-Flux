@@ -56,11 +56,10 @@ void SerialConsole::processBufferedNumber() {
   }
   inputBuffer_[inputLength_] = '\0';
   const int requestedCount = atoi(inputBuffer_);
-  const StateSnapshot state = router_.snapshot();
-  const uint16_t activeCount = state.lighting.layout.activeCount;
-  if (requestedCount < 0 || requestedCount > activeCount) {
+  if (requestedCount < 0 ||
+      requestedCount > spatial_light::kMaxLedCount) {
     stream_.printf("[SERIAL] Invalid count: %d. Enter 0..%u.\n", requestedCount,
-                   activeCount);
+                   spatial_light::kMaxLedCount);
   } else {
     const ControlCommand command{
         kControlProtocolVersion,
@@ -73,7 +72,9 @@ void SerialConsole::processBufferedNumber() {
         makeDefaultSpatialLayout(),
     };
     if (router_.dispatch(command).accepted()) {
-      stream_.printf("[SERIAL] Lit pixels: %d/%u\n", requestedCount, activeCount);
+      stream_.printf(
+          "[SERIAL] Space pixel intent: %d (each node clamps locally).\n",
+          requestedCount);
     } else {
       stream_.println(F("[SERIAL] Pixel-count command was rejected."));
     }
@@ -84,18 +85,21 @@ void SerialConsole::processBufferedNumber() {
 
 void SerialConsole::printStatus() {
   const StateSnapshot state = router_.snapshot();
-  stream_.printf("[LED] Active: %u/%u | Mode: %u | Brightness: %u\n",
-                 state.lighting.layout.activeCount, spatial_light::kMaxLedCount,
+  stream_.printf("[LOCAL NODE] Active: %u/%u\n",
+                 state.lighting.layout.activeCount,
+                 spatial_light::kMaxLedCount);
+  stream_.printf("[SPACE] Mode: %u | Brightness: %u | Manual pixels: %d | "
+                 "Revision: %lu\n",
                  static_cast<unsigned int>(state.lighting.mode),
-                 state.lighting.brightness);
+                 state.lighting.brightness, state.manualLitPixelCount,
+                 static_cast<unsigned long>(state.sceneRevision));
 }
 
 void SerialConsole::printHelp() {
-  const StateSnapshot state = router_.snapshot();
   stream_.println();
   stream_.println(F("Serial commands (115200 baud):"));
   stream_.printf("  0..%u = Light the first N active pixels\n",
-                 state.lighting.layout.activeCount);
+                 spatial_light::kMaxLedCount);
   stream_.println(F("  s = Print light status"));
   stream_.println(F("  h = Print this help"));
   stream_.println();

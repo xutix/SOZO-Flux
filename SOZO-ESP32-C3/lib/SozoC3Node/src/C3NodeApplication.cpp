@@ -189,7 +189,7 @@ void C3NodeApplication::handleInbound(const node::Envelope &envelope,
           envelope.channelId ==
                   static_cast<uint16_t>(node::TopicId::NodeIndependentScene)
               ? SceneTarget::Independent
-              : SceneTarget::FollowMain;
+              : SceneTarget::FollowSpace;
       if (envelope.channelId == static_cast<uint16_t>(node::TopicId::SpaceScene) ||
           target == SceneTarget::Independent) {
         if (node::readSceneSnapshot(envelope, scene) == node::CodecResult::Ok) {

@@ -25,6 +25,9 @@ jobs:
           - name: Gateway S3
             project: SOZO-ESP32-S3
             environment: esp32-s3-devkitc-1
+          - name: Hub-only S3
+            project: SOZO-ESP32-S3
+            environment: esp32-s3-hub-only
           - name: Node C3
             project: SOZO-ESP32-C3
             environment: esp32-c3-supermini

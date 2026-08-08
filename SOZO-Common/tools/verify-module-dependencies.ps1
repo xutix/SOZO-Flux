@@ -13,6 +13,7 @@ $coreModules = @(
   "SozoDomain",
   "SpatialLightCore",
   "SozoLightingCore",
+  "SozoSceneCore",
   "SozoNodeProtocol",
   "SozoBusCore"
 )

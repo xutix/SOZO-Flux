@@ -20,23 +20,24 @@ ControlCommand + source + protocol version
 CommandRouter ---- validation / authorization / delayed persistence
         |
         v
-Authoritative Lighting State
+Authoritative Space Scene
         |
-        +----> Shared Lighting Core ----> Hardware Output Adapter
+        +----> Local Light Node Runtime ----> Shared Lighting Core ----> S3 Output Adapter
         |
-        +----> Node Coordinator --------> Flux Node Bus --------> Extension Node
+        +----> Node Fleet Coordinator ------> Flux Node Bus --------> Remote Light Node Runtime
 ```
 
-任何传输适配器都不得直接修改 LED、NVS 或设备私有状态。场景和状态在协调器中保持权威，
-扩展节点只执行其能力允许的命令并报告事实。
+任何传输适配器都不得直接修改 LED、NVS 或设备私有状态。空间场景在协调器中保持权威；
+S3 本地灯带与远程 C3 都是场景消费者，只执行其能力允许的命令并报告事实。
 
 ## 当前模块边界
 
 | 边界 | 当前目录 | 职责 |
 |---|---|---|
-| Gateway firmware | `SOZO-ESP32-S3` | 组合根、网页/串口入口、Wi-Fi、音频、主灯输出、节点协调 |
+| Hub firmware | `SOZO-ESP32-S3` | 组合根、网页/串口入口、Wi-Fi、音频、节点协调、可选本地灯光节点 |
 | Node firmware | `SOZO-ESP32-C3` | BLE 外设、绑定、节点私有配置、本地灯带输出 |
 | Domain core | `SOZO-Common/lib/SozoDomain` | 状态、命令、来源、参数约束 |
+| Scene core | `SOZO-Common/lib/SozoSceneCore` | 权威空间场景、灯光节点运行时与本地输出端口 |
 | Lighting core | `SOZO-Common/lib/SozoLightingCore` | 灯效、帧、几何映射与输出端口 |
 | Protocol | `SOZO-Common/lib/SozoNodeProtocol` | 二进制封装、消息与 CRC |
 | Bus | `SOZO-Common/lib/SozoBusCore` | 发布订阅和异步请求/响应 |

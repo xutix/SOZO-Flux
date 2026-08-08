@@ -1,7 +1,7 @@
 #pragma once
 
-#include <LightingController.h>
 #include <SettingsStore.h>
+#include <SpaceSceneCoordinator.h>
 
 namespace sozo {
 
@@ -21,11 +21,13 @@ struct CommandResult {
 
 struct StateSnapshot {
   PersistedLightingState lighting;
+  int16_t manualLitPixelCount{-1};
+  uint32_t sceneRevision{0U};
 };
 
 class CommandRouter {
  public:
-  CommandRouter(LightingController &lighting, SettingsStore &settings);
+  CommandRouter(SpaceSceneCoordinator &scenes, SettingsStore &settings);
 
   CommandResult dispatch(const ControlCommand &command);
   StateSnapshot snapshot() const;
@@ -34,7 +36,7 @@ class CommandRouter {
   void tick(uint32_t now);
 
  private:
-  LightingController &lighting_;
+  SpaceSceneCoordinator &scenes_;
   SettingsStore &settings_;
 };
 

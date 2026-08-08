@@ -14,8 +14,7 @@ class NodeCoordinator {
   NodeCoordinator(NodeTransport &transport, NodeRegistry &registry);
 
   bool begin();
-  void tick(uint32_t nowMs, const PersistedLightingState &lightingState,
-            const LightingSnapshot &lightingRuntime,
+  void tick(uint32_t nowMs, const SpaceSceneSnapshot &scene,
             const AudioFrame &audioFrame);
 
   const NodeRegistry &registry() const;
@@ -56,8 +55,7 @@ class NodeCoordinator {
                                 const node::Envelope *response,
                                 void *context);
 
-  void observeScene(const PersistedLightingState &lightingState,
-                    const LightingSnapshot &lightingRuntime);
+  void observeScene(const SpaceSceneSnapshot &scene);
   void observeTransportLifecycle(uint32_t nowMs);
   void handleReadyGeneration(uint32_t nowMs);
   void handleInbound(uint32_t nowMs);

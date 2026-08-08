@@ -22,10 +22,9 @@ NodeCoordinator::NodeCoordinator(NodeTransport &transport,
 bool NodeCoordinator::begin() { return transport_.begin(); }
 
 void NodeCoordinator::tick(const uint32_t nowMs,
-                           const PersistedLightingState &lightingState,
-                           const LightingSnapshot &lightingRuntime,
+                           const SpaceSceneSnapshot &scene,
                            const AudioFrame &audioFrame) {
-  observeScene(lightingState, lightingRuntime);
+  observeScene(scene);
   lastTickMs_ = nowMs;
   transport_.tick(nowMs);
   observeTransportLifecycle(nowMs);
@@ -60,7 +59,7 @@ void NodeCoordinator::tick(const uint32_t nowMs,
       statusRequestedGeneration_ != transport_.readyGeneration()) {
     requestStatus(nowMs);
   }
-  sendAudio(nowMs, lightingState.mode, audioFrame);
+  sendAudio(nowMs, scene.lighting.mode, audioFrame);
 }
 
 const NodeRegistry &NodeCoordinator::registry() const { return registry_; }
@@ -123,9 +122,8 @@ bool NodeCoordinator::requestIndependentScene(
       pendingIndependentSceneCorrelation_ != 0) {
     return false;
   }
-  const LightingSnapshot runtime{state.mode, state.layout.activeCount, false,
-                                 -1};
-  node::SceneSnapshotPayload scene = makeSceneSnapshot(state, runtime);
+  node::SceneSnapshotPayload scene =
+      makeSceneSnapshot(makeLightingScene(state));
   ++independentSceneRevision_;
   if (independentSceneRevision_ == 0U) ++independentSceneRevision_;
   node::Envelope envelope{};
@@ -315,16 +313,13 @@ void NodeCoordinator::onLedCountReceipt(
   coordinator.statusRequestedGeneration_ = 0;
 }
 
-void NodeCoordinator::observeScene(
-    const PersistedLightingState &lightingState,
-    const LightingSnapshot &lightingRuntime) {
-  const node::SceneSnapshotPayload next =
-      makeSceneSnapshot(lightingState, lightingRuntime);
+void NodeCoordinator::observeScene(const SpaceSceneSnapshot &scene) {
+  const node::SceneSnapshotPayload next = makeSceneSnapshot(scene.lighting);
   if (hasScene_ && sameSceneSnapshot(currentScene_, next)) return;
   currentScene_ = next;
   hasScene_ = true;
-  ++sceneRevision_;
-  if (sceneRevision_ == 0) ++sceneRevision_;
+  sceneRevision_ = scene.revision;
+  if (sceneRevision_ == 0U) ++sceneRevision_;
   sceneSentGeneration_ = 0;
 }
 
