@@ -33,6 +33,13 @@ COMMON_SOURCES = [
 ]
 
 TARGETS = {
+    "node-name-policy": {
+        "includes": ["SOZO-ESP32-S3/lib/SozoSettings/src"],
+        "sources": [
+            "SOZO-ESP32-S3/test/test_node_name_policy/test_main.cpp",
+            "SOZO-ESP32-S3/lib/SozoSettings/src/NodeNamePolicy.cpp",
+        ],
+    },
     "gateway-node": {
         "includes": [
             "SOZO-ESP32-S3/lib/SozoNode/src",

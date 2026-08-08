@@ -82,10 +82,23 @@ function findElement(root, predicate) {
   return null;
 }
 
+function nodeCardTitle(card) {
+  return card.children[0].children[0].textContent;
+}
+
 function statusWith(profile) {
   return {
     wifiState: 'connected',
     mdns: 'sozo-flux.local',
+    ip: '192.168.1.46',
+    ssid: 'HEWOOSTUDIO',
+    hubFirmware: '0.1.0-alpha',
+    platformVersion: '0.1.0-alpha',
+    protocolVersion: 1,
+    localLightEnabled: true,
+    localLightName: '',
+    sceneRevision: 4,
+    freeHeap: 140000,
     effect: 'BREATH',
     micAvailable: true,
     startupColor: '#3278dc',
@@ -110,7 +123,8 @@ function statusWith(profile) {
   };
 }
 
-function loadPageUi(serverStatus, nodeResponse = { ok: true, nodes: [] }) {
+function loadPageUi(serverStatus, nodeResponse = { ok: true, nodes: [] },
+  nodeNameFailure = '') {
   const source = readFileSync(new URL('../src/SpatialLightPage.cpp', import.meta.url), 'utf8');
   const match = source.match(/<script>\s*([\s\S]*?)\s*<\/script>/);
   assert.ok(match, 'embedded page script must be present');
@@ -118,7 +132,7 @@ function loadPageUi(serverStatus, nodeResponse = { ok: true, nodes: [] }) {
   const fetchCalls = [];
   const script = match[1].replace(
     'loadStatus();setInterval(()=>loadStatus(false),5000);',
-    'globalThis.__ui={setLayoutProfile,loadStatus,loadNodes,openNodePairing,getLayoutProfile:()=>layoutProfile,setState:value=>state=value,setSelected:value=>selected=value,getState:()=>state,getFetchCalls:()=>fetchCalls,getSelectedExtensionId:()=>selectedNodeId,getSelectedExtensionNode:selectedExtensionNode,renderEffects,chooseEffect,renderParameters,colorControl,extensionColorControl,getParameterClass:typeof parameterLayoutClass===\'function\'?parameterLayoutClass:null,getParameterPlan:typeof parameterPlan===\'function\'?parameterPlan:null,getParameterGridClass:typeof parameterGridClass===\'function\'?parameterGridClass:null,getParameterColumns:typeof parameterColumns===\'function\'?parameterColumns:null,getParameterGridItems:typeof parameterGridItems===\'function\'?parameterGridItems:null};',
+    'globalThis.__ui={setLayoutProfile,loadStatus,loadNodes,openNodePairing,activateView,saveNodeName,getLayoutProfile:()=>layoutProfile,getActiveView:()=>activeView,setState:value=>state=value,setSelected:value=>selected=value,getState:()=>state,getFetchCalls:()=>fetchCalls,getSelectedNodeId:()=>selectedNodeId,getSelectedRemoteNode:selectedRemoteNode,getScopeValue:()=>document.getElementById(\'scopeValue\').textContent,getNodeNameDrafts:()=>nodeNameDrafts,renderEffects,chooseEffect,renderParameters,renderLightNodes,renderLightNodeControl,renderSpaceStatus,colorControl,extensionColorControl,getParameterClass:typeof parameterLayoutClass===\'function\'?parameterLayoutClass:null,getParameterPlan:typeof parameterPlan===\'function\'?parameterPlan:null,getParameterGridClass:typeof parameterGridClass===\'function\'?parameterGridClass:null,getParameterColumns:typeof parameterColumns===\'function\'?parameterColumns:null,getParameterGridItems:typeof parameterGridItems===\'function\'?parameterGridItems:null};',
   );
   const sandbox = {
     URLSearchParams,
@@ -129,10 +143,17 @@ function loadPageUi(serverStatus, nodeResponse = { ok: true, nodes: [] }) {
     fetch: async (url, options = {}) => {
       const requestUrl = String(url);
       fetchCalls.push({ url: requestUrl, options });
+      const nodeNameFailed = requestUrl === '/api/node/name' && nodeNameFailure;
       return {
-        ok: true,
+        ok: !nodeNameFailed,
         json: async () => {
           if (requestUrl.includes('/api/nodes')) return structuredClone(nodeResponse);
+          if (requestUrl === '/api/node/name') {
+            if (nodeNameFailed) return { ok: false, error: nodeNameFailure };
+            const body = new URLSearchParams(options.body);
+            const name = (body.get('name') || '').trim();
+            return { ok: true, id: body.get('id'), name, usingDefault: name.length === 0 };
+          }
           if (requestUrl === '/api/node/firmware') {
             return { ok: true, state: 'idle', nodeId: '00000000', progress: 0, error: 'none' };
           }
@@ -371,26 +392,225 @@ test('renders grid items without wrapper rows', () => {
   assert.equal(items[1].children[0].className.includes('param-brightness'), true);
 });
 
-test('offers selectable extension lights with separate follow and independent controls', () => {
+test('offers one light-node list with local and wireless node controls', () => {
   const source = readFileSync(new URL('../src/SpatialLightPage.cpp', import.meta.url), 'utf8');
 
   for (const required of [
-    'extensionNodeList',
-    'extensionControlPanel',
-    'renderExtensionNodes',
+    'lightNodeList',
+    'nodeControlPanel',
+    'renderLightNodes',
+    'renderLocalNodeControl',
+    'renderRemoteNodeControl',
     'setExtensionControlMode',
     'syncExtensionLighting',
     '/api/node/mode',
     '/api/node/lighting',
-    '跟随空间场景',
+    '跟随空间',
     '独立控制',
   ]) {
     assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
-      `missing extension-device interaction: ${required}`);
+      `missing light-node interaction: ${required}`);
   }
+  assert.match(source, /node\.lightCapable===true/);
+  assert.match(source, /node\.otaCapable===true/);
+  assert.doesNotMatch(source, /node\.capabilities/);
 });
 
-test('opens a sixty-second add-device window from the device page', async () => {
+test('exposes only space, light nodes, and hub system as top-level scopes', () => {
+  const source = readFileSync(new URL('../src/SpatialLightPage.cpp', import.meta.url), 'utf8');
+  const tabs = [...source.matchAll(/data-tab="([^"]+)"/g)].map(match => match[1]);
+
+  assert.deepEqual(tabs, ['space', 'nodes', 'system']);
+  for (const label of ['空间', '灯光节点', '中枢系统', '当前空间场景', '灯珠几何']) {
+    assert.match(source, new RegExp(label));
+  }
+  assert.doesNotMatch(source, /主灯|副设备|同步主灯/);
+  assert.doesNotMatch(source, /data-tab="(?:lighting|layout|device)"/);
+});
+
+test('changes the visible operation scope without changing the selected node', async () => {
+  const nodeResponse = { ok: true, knownCount: 1, onlineCount: 1, nodes: [
+    { id: 'c3000042', lightCapable: true, state: 'ready', bound: true,
+      ledCount: 60, controlMode: 0, lastSceneRevision: 4 },
+  ] };
+  const { document, ui } = loadPageUi(statusWith('continuous'), nodeResponse);
+  ui.setState(statusWith('continuous'));
+  await ui.loadNodes();
+
+  ui.activateView('nodes');
+  assert.equal(ui.getScopeValue(), '本地灯光节点');
+  document.getElementById('lightNodeList').children[1].onclick();
+  assert.equal(ui.getScopeValue(), '无线灯光节点 · C3000042');
+  ui.activateView('system');
+  assert.equal(ui.getScopeValue(), 'Flux Hub');
+  assert.equal(ui.getSelectedNodeId(), 'c3000042');
+});
+
+test('hub-only firmware omits the local light node', async () => {
+  const status = statusWith('continuous');
+  status.localLightEnabled = false;
+  const nodeResponse = { ok: true, nodes: [
+    { id: 'c3000042', lightCapable: true, state: 'ready', bound: true,
+      ledCount: 60, controlMode: 0 },
+  ] };
+  const { document, ui } = loadPageUi(status, nodeResponse);
+  ui.setState(status);
+
+  await ui.loadNodes();
+
+  const cards = document.getElementById('lightNodeList').children;
+  assert.equal(cards.length, 1);
+  assert.notEqual(nodeCardTitle(cards[0]), '本地灯光节点');
+  assert.equal(ui.getSelectedNodeId(), 'c3000042');
+});
+
+test('offline wireless nodes keep their last-known configuration visible', async () => {
+  const status = statusWith('continuous');
+  status.localLightEnabled = false;
+  const nodeResponse = { ok: true, nodes: [
+    { id: '51930b93', lightCapable: true, state: 'offline', bound: true,
+      ledCount: 71, controlMode: 1 },
+  ] };
+  const { document, ui } = loadPageUi(status, nodeResponse);
+  ui.setState(status);
+
+  await ui.loadNodes();
+
+  const panel = document.getElementById('nodeControlPanel').html;
+  assert.match(panel, /已绑定 · 当前离线/);
+  assert.match(panel, /独立控制 · 71 颗灯珠/);
+  assert.doesNotMatch(panel, /data-mode=/);
+});
+
+test('renders local and wireless names as text while retaining the stable node id', async () => {
+  const status = statusWith('continuous');
+  status.localLightName = '<主灯 & "A">';
+  const nodeResponse = { ok: true, nodes: [
+    { id: '51930b93', name: '<img src=x onerror=alert(1)>', lightCapable: true,
+      state: 'ready', bound: true, ledCount: 71, controlMode: 0 },
+  ] };
+  const { document, ui } = loadPageUi(status, nodeResponse);
+  ui.setState(status);
+
+  await ui.loadNodes();
+
+  const cards = document.getElementById('lightNodeList').children;
+  assert.equal(nodeCardTitle(cards[0]), '<主灯 & "A">');
+  assert.equal(nodeCardTitle(cards[1]), '<img src=x onerror=alert(1)>');
+  assert.match(cards[1].children[1].children[0].textContent, /51930B93/);
+  assert.doesNotMatch(cards[1].html || '', /onerror/);
+  cards[1].onclick();
+  assert.equal(document.getElementById('nodeControlName').textContent,
+    '<img src=x onerror=alert(1)>');
+});
+
+test('keeps an unsaved node-name draft across node polling', async () => {
+  const nodeResponse = { ok: true, nodes: [
+    { id: '51930b93', name: '旧名称', lightCapable: true, state: 'ready',
+      bound: true, ledCount: 71, controlMode: 0 },
+  ] };
+  const { document, ui } = loadPageUi(statusWith('continuous'), nodeResponse);
+  ui.setState(statusWith('continuous'));
+
+  await ui.loadNodes();
+  document.getElementById('lightNodeList').children[1].onclick();
+  const input = document.getElementById('nodeNameInput');
+  input.value = '尚未保存的新名称';
+  input.oninput();
+
+  await ui.loadNodes();
+
+  assert.equal(document.getElementById('nodeNameInput').value, '尚未保存的新名称');
+  assert.equal(ui.getNodeNameDrafts()['51930b93'], '尚未保存的新名称');
+});
+
+test('uses the default name as a placeholder and limits input to 16 code points', async () => {
+  const nodeResponse = { ok: true, nodes: [
+    { id: '51930b93', name: '', lightCapable: true, state: 'ready',
+      bound: true, ledCount: 71, controlMode: 0 },
+  ] };
+  const { document, ui } = loadPageUi(statusWith('continuous'), nodeResponse);
+  ui.setState(statusWith('continuous'));
+  await ui.loadNodes();
+  document.getElementById('lightNodeList').children[1].onclick();
+  const input = document.getElementById('nodeNameInput');
+
+  assert.equal(input.value, '');
+  assert.equal(input.placeholder, '无线灯光节点 · 51930B93');
+  input.value = '一二三四五六七八九十一二三四五六七';
+  input.oninput();
+  assert.equal(Array.from(input.value).length, 16);
+  input.value = '😀'.repeat(16);
+  input.oninput();
+  assert.equal(input.value, '😀'.repeat(16));
+});
+
+test('renames an offline node on the Hub without waiting for a BLE receipt', async () => {
+  const status = statusWith('continuous');
+  status.localLightEnabled = false;
+  const nodeResponse = { ok: true, nodes: [
+    { id: '51930b93', name: '旧名称', lightCapable: true, state: 'offline',
+      bound: true, ledCount: 71, controlMode: 1 },
+  ] };
+  const { document, ui } = loadPageUi(status, nodeResponse);
+  ui.setState(status);
+  await ui.loadNodes();
+  ui.activateView('nodes');
+  const beforeNodePolls = ui.getFetchCalls().filter(call => call.url === '/api/nodes').length;
+  const input = document.getElementById('nodeNameInput');
+  input.value = '西侧灯带';
+  input.oninput();
+
+  await ui.saveNodeName('51930b93');
+
+  const rename = ui.getFetchCalls().find(call => call.url === '/api/node/name');
+  assert.ok(rename);
+  assert.equal(new URLSearchParams(rename.options.body).get('name'), '西侧灯带');
+  assert.equal(ui.getSelectedRemoteNode().name, '西侧灯带');
+  assert.equal(ui.getScopeValue(), '西侧灯带');
+  assert.equal(ui.getFetchCalls().filter(call => call.url === '/api/nodes').length,
+    beforeNodePolls);
+});
+
+test('keeps the node-name draft when the Hub rejects a save', async () => {
+  const nodeResponse = { ok: true, nodes: [
+    { id: '51930b93', name: '旧名称', lightCapable: true, state: 'ready',
+      bound: true, ledCount: 71, controlMode: 0 },
+  ] };
+  const { document, ui } = loadPageUi(statusWith('continuous'), nodeResponse,
+    '名称保存失败');
+  ui.setState(statusWith('continuous'));
+  await ui.loadNodes();
+  document.getElementById('lightNodeList').children[1].onclick();
+  const input = document.getElementById('nodeNameInput');
+  input.value = '保留这份草稿';
+  input.oninput();
+
+  await ui.saveNodeName('51930b93');
+
+  assert.equal(ui.getNodeNameDrafts()['51930b93'], '保留这份草稿');
+  assert.equal(document.getElementById('nodeNameInput').value, '保留这份草稿');
+  assert.match(document.getElementById('nodeMessage').textContent, /保存失败/);
+});
+
+test('an empty local name restores the default display name', async () => {
+  const status = statusWith('continuous');
+  status.localLightName = '工作台主灯';
+  const { document, ui } = loadPageUi(status);
+  ui.setState(status);
+  ui.renderLightNodes();
+  const input = document.getElementById('nodeNameInput');
+  input.value = '   ';
+  input.oninput();
+
+  await ui.saveNodeName('local-s3');
+
+  assert.equal(ui.getState().localLightName, '');
+  assert.equal(nodeCardTitle(document.getElementById('lightNodeList').children[0]),
+    '本地灯光节点');
+});
+
+test('opens a sixty-second add-node window from the hub system page', async () => {
   const response = { ok: true, nodes: [], knownCount: 0, onlineCount: 0,
     capacity: 4, pairingWindowOpen: false, pairingRemainingMs: 0 };
   const { document, ui } = loadPageUi(statusWith('continuous'), response);
@@ -400,7 +620,7 @@ test('opens a sixty-second add-device window from the device page', async () => 
   const request = ui.getFetchCalls().find(call => call.url === '/api/nodes/pairing');
   assert.ok(request);
   assert.equal(request.options.method, 'POST');
-  assert.match(document.getElementById('extensionNodeMessage').textContent, /60/);
+  assert.match(document.getElementById('systemMessage').textContent, /60/);
 });
 
 test('offers one local LED-count editor for each online light extension', () => {
@@ -432,12 +652,12 @@ test('offers firmware selection and progress only through the C3 OTA endpoint', 
   }
 });
 
-test('selects the first available light extension and renders mode controls', async () => {
+test('keeps the local node selected, then renders wireless-node mode controls', async () => {
   const nodeResponse = {
     ok: true,
     nodes: [
-      { id: 'c3000042', capabilities: 1, state: 'ready', bound: true, ledCount: 60, controlMode: 0 },
-      { id: 'c3000099', capabilities: 2, state: 'ready', bound: true, ledCount: 0, controlMode: 0 },
+      { id: 'c3000042', lightCapable: true, state: 'ready', bound: true, ledCount: 60, controlMode: 0 },
+      { id: 'c3000099', lightCapable: false, state: 'ready', bound: true, ledCount: 0, controlMode: 0 },
     ],
   };
   const { document, ui } = loadPageUi(statusWith('continuous'), nodeResponse);
@@ -445,10 +665,15 @@ test('selects the first available light extension and renders mode controls', as
 
   await ui.loadNodes();
 
-  assert.equal(ui.getSelectedExtensionId(), 'c3000042');
-  assert.equal(ui.getSelectedExtensionNode().ledCount, 60);
-  assert.match(document.getElementById('extensionControlPanel').html, /跟随空间场景/);
-  assert.match(document.getElementById('extensionControlPanel').html, /独立控制/);
+  assert.equal(ui.getSelectedNodeId(), 'local-s3');
+  const cards = document.getElementById('lightNodeList').children;
+  assert.equal(cards.length, 2);
+  assert.equal(nodeCardTitle(cards[0]), '本地灯光节点');
+  cards[1].onclick();
+  assert.equal(ui.getSelectedNodeId(), 'c3000042');
+  assert.equal(ui.getSelectedRemoteNode().ledCount, 60);
+  assert.match(document.getElementById('nodeControlPanel').html, /跟随空间/);
+  assert.match(document.getElementById('nodeControlPanel').html, /独立控制/);
 });
 
 test('makes leftover controls full width after the color pair', () => {

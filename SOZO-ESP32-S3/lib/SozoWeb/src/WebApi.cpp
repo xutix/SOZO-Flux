@@ -1,9 +1,14 @@
 #include <WebApi.h>
 
+#include <SozoVersion.h>
 #include <SpatialLightCore.h>
 
 #include <esp_heap_caps.h>
 #include <mbedtls/sha256.h>
+
+#ifndef SOZO_LOCAL_LIGHT_ENABLED
+#define SOZO_LOCAL_LIGHT_ENABLED 1
+#endif
 
 namespace {
 
@@ -250,6 +255,7 @@ namespace sozo {
 
 WebApi::WebApi(CommandRouter &commands, NetworkManager &network,
                AudioAnalyzer &audio, NodeFleetCoordinator &nodes,
+               NodeNameStore &nodeNames,
                const PageBuilder spatialPage,
                const RestartCallback restart)
     : server_(80),
@@ -257,6 +263,7 @@ WebApi::WebApi(CommandRouter &commands, NetworkManager &network,
       network_(network),
       audio_(audio),
       nodes_(nodes),
+      nodeNames_(nodeNames),
       spatialPage_(spatialPage),
       restart_(restart) {}
 
@@ -296,6 +303,8 @@ void WebApi::registerRoutes() {
              [this]() { handleSetNodeLighting(); });
   server_.on("/api/node/led-count", HTTP_POST,
              [this]() { handleSetNodeLedCount(); });
+  server_.on("/api/node/name", HTTP_POST,
+             [this]() { handleSetNodeName(); });
   server_.on("/api/node/firmware", HTTP_GET,
              [this]() { handleGetNodeFirmwareStatus(); });
   server_.on("/api/node/firmware", HTTP_POST,
@@ -841,6 +850,59 @@ void WebApi::handleSetNodeLedCount() {
   server_.send(202, "application/json; charset=utf-8", json);
 }
 
+void WebApi::handleSetNodeName() {
+  if (!server_.hasArg("id") || !server_.hasArg("name")) {
+    sendApiResult(false, "node id and name are required");
+    return;
+  }
+
+  const String requestedId = server_.arg("id");
+  String normalizedName;
+  NodeNameSaveResult result = NodeNameSaveResult::InvalidName;
+  if (requestedId == "local-s3") {
+    if (!SOZO_LOCAL_LIGHT_ENABLED) {
+      sendApiResult(false, "local light node is disabled");
+      return;
+    }
+    result = nodeNames_.saveLocalName(server_.arg("name"), normalizedName);
+  } else {
+    node::NodeId nodeId{0U};
+    if (!parseNodeId(requestedId, nodeId)) {
+      sendApiResult(false, "valid node id is required");
+      return;
+    }
+    const NodeRecord *record = nodes_.registry().find(nodeId);
+    if (record == nullptr ||
+        (record->capabilities.capabilityBits &
+         node::capabilityMask(node::Capability::LightOutput)) == 0U) {
+      sendApiResult(false, "selected light node is unknown");
+      return;
+    }
+    result =
+        nodeNames_.saveNodeName(nodeId, server_.arg("name"), normalizedName);
+  }
+
+  if (result == NodeNameSaveResult::InvalidName) {
+    sendApiResult(false,
+                  "name must be valid UTF-8 with at most 16 characters");
+    return;
+  }
+  if (result == NodeNameSaveResult::StorageFailure) {
+    server_.send(500, "application/json; charset=utf-8",
+                 "{\"ok\":false,\"error\":\"failed to save node name\"}");
+    return;
+  }
+
+  String json = F("{\"ok\":true,\"id\":\"");
+  json += escapeJson(requestedId);
+  json += F("\",\"name\":\"");
+  json += escapeJson(normalizedName);
+  json += F("\",\"usingDefault\":");
+  json += normalizedName.isEmpty() ? F("true") : F("false");
+  json += '}';
+  server_.send(200, "application/json; charset=utf-8", json);
+}
+
 void WebApi::handleNodeFirmwareUploadData() {
   HTTPUpload &upload = server_.upload();
   if (upload.status == UPLOAD_FILE_START) {
@@ -999,9 +1061,22 @@ void WebApi::handleApiStatus() {
   snprintf(startupColorHex, sizeof(startupColorHex), "#%02x%02x%02x",
            state.startupColor.red, state.startupColor.green, state.startupColor.blue);
   String json;
-  json.reserve(1700);
+  json.reserve(1950);
   json += F("{\"wifi\":");
   json += network.state != NetworkState::Failed ? F("true") : F("false");
+  json += F(",\"hubFirmware\":\"");
+  json += sozo::version::kGatewayS3;
+  json += F("\",\"platformVersion\":\"");
+  json += sozo::version::kPlatform;
+  json += F("\",\"protocolVersion\":");
+  json += sozo::node::kProtocolVersion;
+  json += F(",\"localLightEnabled\":");
+  json += SOZO_LOCAL_LIGHT_ENABLED ? F("true") : F("false");
+  json += F(",\"localLightName\":\"");
+  json += escapeJson(nodeNames_.localName());
+  json += '"';
+  json += F(",\"sceneRevision\":");
+  json += snapshot.sceneRevision;
   json += F(",\"wifiState\":\"");
   json += networkStateName(network.state);
   json += F("\",\"wifiMode\":\"");
@@ -1118,7 +1193,7 @@ void WebApi::handleGetNodes() {
   };
 
   String json;
-  json.reserve(1100);
+  json.reserve(1400);
   json += F("{\"ok\":true,\"bleState\":\"");
   json += transportStateName(nodes_.transportState());
   json += F("\",\"ready\":");
@@ -1154,10 +1229,17 @@ void WebApi::handleGetNodes() {
              static_cast<unsigned long>(record->nodeId));
     json += F("{\"id\":\"");
     json += nodeId;
+    json += F("\",\"name\":\"");
+    json += escapeJson(nodeNames_.nodeName(record->nodeId));
     json += F("\",\"state\":\"");
     json += connectionStateName(record->connectionState);
     json += F("\",\"capabilities\":");
     json += record->capabilities.capabilityBits;
+    json += F(",\"lightCapable\":");
+    json += (record->capabilities.capabilityBits &
+             node::capabilityMask(node::Capability::LightOutput)) != 0U
+                ? F("true")
+                : F("false");
     json += F(",\"otaCapable\":");
     json += (record->capabilities.capabilityBits &
              node::capabilityMask(node::Capability::FirmwareUpdate)) != 0U

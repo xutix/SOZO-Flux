@@ -10,6 +10,7 @@
 #include <LightingController.h>
 #include <LightingControllerNodeSink.h>
 #include <NetworkManager.h>
+#include <NodeNameStore.h>
 #include <NodeFleetCoordinator.h>
 #include <SerialConsole.h>
 #include <SettingsStore.h>
@@ -39,6 +40,7 @@ constexpr uint8_t kStatusLedBrightness = 60;
 constexpr uint32_t kSerialReportIntervalMs = 500;
 
 sozo::SettingsStore settingsStore;
+sozo::NodeNameStore nodeNameStore;
 sozo::NetworkManager networkManager(settingsStore);
 sozo::SpaceSceneCoordinator sceneCoordinator;
 #if SOZO_LOCAL_LIGHT_ENABLED
@@ -58,7 +60,7 @@ Adafruit_NeoPixel statusLed(kStatusLedCount, kStatusLedPin,
 
 void restartDevice();
 sozo::WebApi webApi(commandRouter, networkManager, audioAnalyzer,
-                    nodeCoordinator,
+                    nodeCoordinator, nodeNameStore,
                     buildSpatialLightPage, restartDevice);
 
 uint32_t lastSerialReport = 0;

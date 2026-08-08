@@ -6,6 +6,14 @@ const source = readFileSync(
   new URL('../lib/SozoWeb/src/WebApi.cpp', import.meta.url),
   'utf8',
 );
+const nodeNameStoreSource = readFileSync(
+  new URL('../lib/SozoSettings/src/NodeNameStore.cpp', import.meta.url),
+  'utf8',
+);
+const nodeNamePolicySource = readFileSync(
+  new URL('../lib/SozoSettings/src/NodeNamePolicy.cpp', import.meta.url),
+  'utf8',
+);
 
 test('/api/nodes keeps its existing fields and exposes BLE worker diagnostics', () => {
   for (const field of [
@@ -28,6 +36,51 @@ test('provides device-scoped endpoints for control mode and independent scenes',
   assert.match(source, /handleSetNodeLighting/);
   assert.match(source, /requestNodeControlMode/);
   assert.match(source, /requestIndependentScene/);
+});
+
+test('/api/status identifies the Flux Hub and optional local light node', () => {
+  for (const field of [
+    'hubFirmware',
+    'platformVersion',
+    'protocolVersion',
+    'localLightEnabled',
+    'sceneRevision',
+  ]) {
+    assert.match(source, new RegExp(`\\\\"${field}\\\\"`),
+      `missing /api/status field: ${field}`);
+  }
+});
+
+test('/api/nodes exposes light capability without leaking its bit mask to the UI', () => {
+  assert.match(source, /\\"lightCapable\\"/);
+  assert.match(source, /Capability::LightOutput/);
+});
+
+test('persists editable local and wireless light-node names on the Hub', () => {
+  assert.match(source, /"\/api\/node\/name"/);
+  assert.match(source, /handleSetNodeName/);
+  assert.match(source, /\\"localLightName\\"/);
+  assert.match(source, /\\"name\\"/);
+  assert.match(source, /nodeNames_\.saveLocalName/);
+  assert.match(source, /nodeNames_\.saveNodeName/);
+  assert.match(source, /escapeJson\(nodeNames_\./);
+  assert.doesNotMatch(
+    source.slice(source.indexOf('void WebApi::handleSetNodeName'),
+      source.indexOf('void WebApi::handleNodeFirmwareUploadData')),
+    /requestNode|lastReceiptMs/,
+    'Hub-local names must not wait for a BLE command receipt',
+  );
+});
+
+test('node-name storage validates UTF-8, caches reads, and clears aliases safely', () => {
+  assert.match(nodeNamePolicySource, /decodeUtf8CodePoint/);
+  assert.match(nodeNamePolicySource, /kMaxNodeNameCodePoints/);
+  assert.match(nodeNamePolicySource, /codePoint >= 0x7fU && codePoint <= 0x9fU/);
+  assert.match(nodeNameStoreSource, /inspectNodeName/);
+  assert.match(nodeNameStoreSource, /preferences_\.remove/);
+  assert.match(nodeNameStoreSource, /local_name/);
+  assert.match(nodeNameStoreSource, /"n%08lx"/);
+  assert.match(nodeNameStoreSource, /entry->loaded/);
 });
 
 test('/api/nodes exposes fleet capacity and an explicit pairing window', () => {

@@ -6,6 +6,7 @@
 #include <AudioAnalyzer.h>
 #include <CommandRouter.h>
 #include <NetworkManager.h>
+#include <NodeNameStore.h>
 #include <NodeFleetCoordinator.h>
 
 namespace sozo {
@@ -17,6 +18,7 @@ class WebApi {
 
   WebApi(CommandRouter &commands, NetworkManager &network,
          AudioAnalyzer &audio, NodeFleetCoordinator &nodes,
+         NodeNameStore &nodeNames,
          PageBuilder spatialPage,
          RestartCallback restart);
 
@@ -39,6 +41,7 @@ class WebApi {
   void handleSetNodeMode();
   void handleSetNodeLighting();
   void handleSetNodeLedCount();
+  void handleSetNodeName();
   void handleNodeFirmwareUpload();
   void handleNodeFirmwareUploadData();
   void handleGetNodeFirmwareStatus();
@@ -66,6 +69,7 @@ class WebApi {
   NetworkManager &network_;
   AudioAnalyzer &audio_;
   NodeFleetCoordinator &nodes_;
+  NodeNameStore &nodeNames_;
   PageBuilder spatialPage_;
   RestartCallback restart_;
   uint8_t *nodeFirmwareImage_{nullptr};
