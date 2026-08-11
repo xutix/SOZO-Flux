@@ -869,6 +869,71 @@ void test_node_led_count_is_saved_locally_and_survives_scene_commands() {
   CHECK_EQ(58U, status.ledCount);
 }
 
+void test_node_geometry_is_saved_applied_and_reported() {
+  FakeLightingSink sink(sozo::makeDefaultPersistedLightingState());
+  FakeButtonInput button;
+  FakeDiagnostics diagnostics;
+  FakeBindingRepository bindings;
+  FakeNodeControlRepository controls;
+  FakeNodeLedCountRepository ledCounts;
+  FakeNodeTransport transport;
+  sozo::c3::PairingWindow pairing(1500U, 60000U);
+  const sozo::c3::C3NodeProfile profile{60U, 512U, 1U};
+  sozo::c3::C3NodeApplication app(sink, button, diagnostics, pairing,
+                                   transport, bindings, controls, ledCounts,
+                                   profile);
+  CHECK_TRUE(app.begin(0xC3000042U, 0U));
+
+  sozo::node::LedGeometryPayload geometry{};
+  geometry.layoutProfile = 1U;
+  geometry.activeCount = 72U;
+  geometry.centerIndex = 35U;
+  geometry.leftCount = 18U;
+  geometry.centerCount = 36U;
+  geometry.rightCount = 18U;
+  geometry.spatialFlags = sozo::node::kSpatialFlagReversed;
+  sozo::node::Envelope request{};
+  request.flags = sozo::node::kFlagRequiresAck;
+  request.sourceNodeId = sozo::node::kCoordinatorNodeId;
+  request.correlationId = 94U;
+  CHECK_EQ(sozo::node::CodecResult::Ok,
+           sozo::node::writeLedGeometryRequest(request, geometry));
+  transport.queueInbound(request);
+  app.tick(10U);
+
+  sozo::node::CommandReceiptPayload receipt{};
+  CHECK_EQ(sozo::node::CodecResult::Ok,
+           sozo::node::readCommandReceipt(transport.sent[0], receipt));
+  CHECK_TRUE(receipt.accepted);
+  CHECK_EQ(72U, ledCounts.state.ledCount);
+  CHECK_EQ(1U, ledCounts.state.layoutProfile);
+  CHECK_TRUE(ledCounts.state.reversed);
+  CHECK_EQ(spatial_light::LayoutProfile::Segmented, sink.state_.layout.profile);
+  CHECK_EQ(72U, sink.state_.layout.activeCount);
+  CHECK_EQ(18U, sink.state_.layout.leftCount);
+  CHECK_EQ(36U, sink.state_.layout.centerCount);
+  CHECK_EQ(18U, sink.state_.layout.rightCount);
+  CHECK_TRUE(sink.state_.layout.reversed);
+
+  sozo::node::Envelope statusRequest{};
+  statusRequest.flags = sozo::node::kFlagRequiresAck;
+  statusRequest.sourceNodeId = sozo::node::kCoordinatorNodeId;
+  statusRequest.correlationId = 95U;
+  CHECK_EQ(sozo::node::CodecResult::Ok,
+           sozo::node::writeStatusRequest(statusRequest));
+  transport.queueInbound(statusRequest);
+  app.tick(11U);
+  sozo::node::StatusSnapshotPayload status{};
+  CHECK_EQ(sozo::node::CodecResult::Ok,
+           sozo::node::readStatusSnapshot(transport.sent[1], status));
+  CHECK_EQ(72U, status.ledCount);
+  CHECK_EQ(1U, status.layoutProfile);
+  CHECK_EQ(18U, status.leftCount);
+  CHECK_EQ(36U, status.centerCount);
+  CHECK_EQ(18U, status.rightCount);
+  CHECK_EQ(sozo::node::kSpatialFlagReversed, status.spatialFlags);
+}
+
 }  // namespace
 
 int runNodeRuntimeTests() {
@@ -894,6 +959,7 @@ int runNodeRuntimeTests() {
   test_node_application_keeps_transport_and_rendering_separate();
   test_failed_control_mode_persistence_restores_follow_output();
   test_node_led_count_is_saved_locally_and_survives_scene_commands();
+  test_node_geometry_is_saved_applied_and_reported();
   return sozo::test::finish("C3 node runtime tests");
 }
 

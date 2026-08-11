@@ -93,6 +93,12 @@ struct StatusSnapshotPayload {
   NodeControlMode controlMode{NodeControlMode::FollowMain};
   bool pairingWindowOpen{false};
   uint16_t ledCount{0};
+  uint8_t layoutProfile{0};
+  uint16_t centerIndex{0};
+  uint16_t leftCount{0};
+  uint16_t centerCount{0};
+  uint16_t rightCount{0};
+  uint8_t spatialFlags{0};
 };
 
 struct ControlModePayload {
@@ -101,6 +107,16 @@ struct ControlModePayload {
 
 struct LedCountPayload {
   uint16_t ledCount{0};
+};
+
+struct LedGeometryPayload {
+  uint8_t layoutProfile{0};
+  uint16_t activeCount{0};
+  uint16_t centerIndex{0};
+  uint16_t leftCount{0};
+  uint16_t centerCount{0};
+  uint16_t rightCount{0};
+  uint8_t spatialFlags{0};
 };
 
 enum class FirmwareUpdateState : uint8_t {
@@ -153,10 +169,11 @@ constexpr uint16_t kAudioFeaturesWireBytes = 13;
 constexpr uint16_t kBindRequestWireBytes = 8;
 constexpr uint16_t kBindResultWireBytes = 11;
 constexpr uint16_t kCommandReceiptWireBytes = 7;
-constexpr uint16_t kStatusSnapshotWireBytes = 14;
+constexpr uint16_t kStatusSnapshotWireBytes = 24;
 constexpr uint16_t kStatusRequestWireBytes = 0;
 constexpr uint16_t kControlModeWireBytes = 1;
 constexpr uint16_t kLedCountWireBytes = 2;
+constexpr uint16_t kLedGeometryWireBytes = 12;
 constexpr uint16_t kFirmwareBeginWireBytes = 36;
 constexpr uint16_t kFirmwareChunkHeaderWireBytes = 4;
 constexpr uint16_t kFirmwareStatusWireBytes = 11;
@@ -202,6 +219,10 @@ CodecResult writeLedCountRequest(Envelope &envelope,
                                  const LedCountPayload &payload);
 CodecResult readLedCountRequest(const Envelope &envelope,
                                 LedCountPayload &payload);
+CodecResult writeLedGeometryRequest(Envelope &envelope,
+                                    const LedGeometryPayload &payload);
+CodecResult readLedGeometryRequest(const Envelope &envelope,
+                                   LedGeometryPayload &payload);
 CodecResult writeFirmwareBegin(Envelope &envelope,
                                const FirmwareBeginPayload &payload);
 CodecResult readFirmwareBegin(const Envelope &envelope,

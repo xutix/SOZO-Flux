@@ -107,9 +107,10 @@ function nodeCardTitle(card) {
 
 function extensionLedEditor(document) {
   const panel = document.getElementById('nodeControlPanel');
-  const section = panel.children.find(child => child.className === 'extension-led-count');
-  assert.ok(section, 'wireless-node LED editor must be rendered');
-  return { panel, section, input: section.querySelector('#extensionLedCount') };
+  const fields = document.getElementById('layoutFields');
+  const section = fields.children[0];
+  assert.ok(section, 'wireless-node geometry editor must be rendered');
+  return { panel, section, input: section.querySelector('input') };
 }
 
 function extensionFirmwareEditor(document) {
@@ -127,7 +128,7 @@ function statusWith(profile) {
     ssid: 'HEWOOSTUDIO',
     hubFirmware: '0.1.0-alpha',
     platformVersion: '0.1.0-alpha',
-    protocolVersion: 1,
+    protocolVersion: 2,
     localLightEnabled: true,
     localLightName: '',
     sceneRevision: 4,
@@ -156,6 +157,20 @@ function statusWith(profile) {
   };
 }
 
+function remoteLayout(activeCount, profile = 'continuous') {
+  const quarter = Math.floor(activeCount / 4);
+  return {
+    profile,
+    activeCount,
+    maxLedCount: 512,
+    centerIndex: Math.floor((activeCount - 1) / 2),
+    leftCount: profile === 'segmented' ? quarter : 0,
+    centerCount: profile === 'segmented' ? activeCount - quarter * 2 : activeCount,
+    rightCount: profile === 'segmented' ? quarter : 0,
+    reversed: false,
+  };
+}
+
 function loadPageUi(serverStatus, nodeResponse = { ok: true, nodes: [] },
   nodeNameFailure = '') {
   const source = readFileSync(new URL('../src/SpatialLightPage.cpp', import.meta.url), 'utf8');
@@ -165,7 +180,7 @@ function loadPageUi(serverStatus, nodeResponse = { ok: true, nodes: [] },
   const fetchCalls = [];
   const script = match[1].replace(
     'loadStatus();setInterval(()=>loadStatus(false),5000);',
-    'globalThis.__ui={setLayoutProfile,loadStatus,loadNodes,openNodePairing,activateView,saveNodeName,getLayoutProfile:()=>layoutProfile,getActiveView:()=>activeView,setState:value=>state=value,setSelected:value=>selected=value,getState:()=>state,getFetchCalls:()=>fetchCalls,getSelectedNodeId:()=>selectedNodeId,getSelectedRemoteNode:selectedRemoteNode,getScopeValue:()=>document.getElementById(\'scopeValue\').textContent,getDraftValue:(nodeId,field=\'name\')=>formDrafts.read(nodeFieldKey(nodeId,field),undefined),renderEffects,chooseEffect,renderParameters,renderLightNodes,renderLightNodeControl,renderSpaceStatus,colorControl,extensionColorControl,getParameterClass:typeof parameterLayoutClass===\'function\'?parameterLayoutClass:null,getParameterPlan:typeof parameterPlan===\'function\'?parameterPlan:null,getParameterGridClass:typeof parameterGridClass===\'function\'?parameterGridClass:null,getParameterColumns:typeof parameterColumns===\'function\'?parameterColumns:null,getParameterGridItems:typeof parameterGridItems===\'function\'?parameterGridItems:null};',
+    'globalThis.__ui={setLayoutProfile,saveLayout,selectControlTarget,loadStatus,loadNodes,openNodePairing,activateView,saveNodeName,getLayoutProfile:()=>layoutProfile,getActiveView:()=>activeView,setState:value=>state=value,setSelected:value=>selected=value,getState:()=>state,getFetchCalls:()=>fetchCalls,getSelectedNodeId:()=>selectedNodeId,getSelectedRemoteNode:selectedRemoteNode,getScopeValue:()=>document.getElementById(\'scopeValue\').textContent,getDraftValue:(nodeId,field=\'name\')=>formDrafts.read(nodeFieldKey(nodeId,field),undefined),renderEffects,chooseEffect,renderParameters,renderLightNodes,renderLightNodeControl,renderSpaceStatus,colorControl,extensionColorControl,getParameterClass:typeof parameterLayoutClass===\'function\'?parameterLayoutClass:null,getParameterPlan:typeof parameterPlan===\'function\'?parameterPlan:null,getParameterGridClass:typeof parameterGridClass===\'function\'?parameterGridClass:null,getParameterColumns:typeof parameterColumns===\'function\'?parameterColumns:null,getParameterGridItems:typeof parameterGridItems===\'function\'?parameterGridItems:null};',
   );
   const sandbox = {
     URLSearchParams,
@@ -189,6 +204,13 @@ function loadPageUi(serverStatus, nodeResponse = { ok: true, nodes: [] },
           }
           if (requestUrl === '/api/node/firmware') {
             return { ok: true, state: 'idle', nodeId: '00000000', progress: 0, error: 'none' };
+          }
+          if (requestUrl === '/api/scenes') {
+            return { ok: true, scenes: [], desired: [] };
+          }
+          if (requestUrl === '/api/target/lighting' ||
+              requestUrl.startsWith('/api/scene')) {
+            return { ok: true };
           }
           if (requestUrl === '/api/lighting') {
             const body = new URLSearchParams(options.body);
@@ -217,7 +239,7 @@ function loadColorMath() {
   assert.ok(match, 'embedded page script must be present');
   const script = match[1].replace(
     'loadStatus();setInterval(()=>loadStatus(false),5000);',
-    "globalThis.__color={hsvToHex:typeof hsvToHex==='function'?hsvToHex:null,hexToHsv:typeof hexToHsv==='function'?hexToHsv:null,palette:typeof COLOR_PALETTE==='undefined'?null:COLOR_PALETTE,createColorPalette:typeof createColorPalette==='function'?createColorPalette:null,createColorChooser:typeof createColorChooser==='function'?createColorChooser:null,resetModes:()=>typeof colorInputModes!=='undefined'&&Object.keys(colorInputModes).forEach(key=>delete colorInputModes[key])};",
+    "globalThis.__color={hsvToHex:typeof hsvToHex==='function'?hsvToHex:null,hexToHsv:typeof hexToHsv==='function'?hexToHsv:null,presets:typeof COLOR_PRESETS==='undefined'?null:COLOR_PRESETS,createColorPresets:typeof createColorPresets==='function'?createColorPresets:null,createColorSpectrum:typeof createColorSpectrum==='function'?createColorSpectrum:null,createColorChooser:typeof createColorChooser==='function'?createColorChooser:null};",
   );
   const sandbox = {
     URLSearchParams,
@@ -261,7 +283,7 @@ test('clears effect highlights while off and restores one after choosing an effe
   assert.match(selectedCards[0].html, /桌面极光/);
 });
 
-test('renders reusable HSV color wheels for lighting colors', () => {
+test('renders a reusable full-brightness HSV spectrum for lighting colors', () => {
   const source = readFileSync(new URL('../src/SpatialLightPage.cpp', import.meta.url), 'utf8');
   const color = loadColorMath();
 
@@ -269,73 +291,87 @@ test('renders reusable HSV color wheels for lighting colors', () => {
   assert.equal(typeof color.hexToHsv, 'function');
   assert.equal(color.hsvToHex(0, 1, 1), '#FF0000');
   assert.deepEqual({ ...color.hexToHsv('#FFFFFF') }, { h: 0, s: 0, v: 1 });
-  assert.match(source, /className='color-wheel'/);
+  assert.match(source, /className='color-spectrum'/);
+  assert.match(source, /hsv\.v=1/);
   assert.match(source, /colorControl\(def\)/);
 });
 
-test('renders a fixed nine-by-five lighting palette with one exact selection', () => {
+test('renders eight full-brightness presets including exact RGB primaries', () => {
   const color = loadColorMath();
-  assert.ok(color.palette);
-  assert.equal(color.palette.length, 9);
-  assert.ok(color.palette.every(column => column.colors.length === 5));
-  assert.ok(color.palette.some(column => column.colors.includes('#FF0000')));
+  assert.ok(color.presets);
+  assert.equal(color.presets.length, 8);
+  assert.ok(color.presets.some(item => item.hex === '#FF0000'));
+  assert.ok(color.presets.some(item => item.hex === '#00FF00'));
+  assert.ok(color.presets.some(item => item.hex === '#0000FF'));
+  assert.ok(color.presets.every(item => color.hexToHsv(item.hex).v === 1));
 
   const changes = [];
-  const palette = color.createColorPalette('#FF0000', next => changes.push(next));
-  assert.equal(palette.children.length, 45);
-  const selected = palette.children.filter(button => button.className.includes('selected'));
+  const presets = color.createColorPresets('#FF0000', next => changes.push(next));
+  assert.equal(presets.children.length, 8);
+  const selected = presets.children.filter(button => button.className.includes('selected'));
   assert.equal(selected.length, 1);
   assert.equal(selected[0].attributes['aria-pressed'], 'true');
 
-  const cyan = palette.children.find(button => button.value === '#34C5C5');
-  cyan.onclick();
-  assert.deepEqual(changes, ['#34C5C5']);
+  const green = presets.children.find(button => button.value === '#00FF00');
+  green.onclick();
+  assert.deepEqual(changes, ['#00FF00']);
 });
 
-test('does not select a preset for a custom wheel color', () => {
+test('does not select a preset for a custom spectrum color', () => {
   const color = loadColorMath();
-  const palette = color.createColorPalette('#123456', () => {});
-  assert.equal(palette.children.filter(button => button.className.includes('selected')).length, 0);
+  const presets = color.createColorPresets('#123456', () => {});
+  assert.equal(presets.children.filter(button => button.className.includes('selected')).length, 0);
 });
 
-test('switches between palette and wheel without changing the color', () => {
+test('combines presets and spectrum in one chooser without a mode switch', () => {
   const color = loadColorMath();
-  color.resetModes();
   const changes = [];
   const chooser = color.createColorChooser('#FF5266', 'Primary', 'main-color', next => changes.push(next));
-  const modeSwitch = chooser.children[0];
-  const body = chooser.children[1];
-
-  assert.equal(modeSwitch.children[0].attributes['aria-pressed'], 'true');
-  assert.equal(body.children[0].className, 'color-palette');
-  modeSwitch.children[1].onclick();
-  assert.equal(modeSwitch.children[1].attributes['aria-pressed'], 'true');
-  assert.equal(body.children[0].className, 'color-wheel');
+  assert.equal(chooser.children.length, 2);
+  assert.equal(chooser.children[0].className, 'color-presets');
+  assert.equal(chooser.children[1].className, 'color-spectrum');
   assert.deepEqual(changes, []);
 });
 
-test('main palette click updates state and uses the existing queued lighting request', async () => {
-  const { ui } = loadPageUi(statusWith('continuous'));
-  ui.setState(statusWith('continuous'));
-  const control = ui.colorControl(['color', 'Primary', 'color', true]);
-  const cyan = findElement(control, item => item.value === '#34C5C5');
-  cyan.onclick();
-  await new Promise(resolve => setTimeout(resolve, 190));
+test('preset clicks work when children is a browser HTMLCollection', () => {
+  const color = loadColorMath();
+  const changes = [];
+  const chooser = color.createColorChooser('#FF0000', 'Primary', 'main-color', next => changes.push(next));
+  const presets = chooser.children[0];
+  const green = presets.children.find(button => button.value === '#00FF00');
 
-  assert.equal(ui.getState().settings.color, '#34C5C5');
-  const request = ui.getFetchCalls().find(call => call.url === '/api/lighting');
-  assert.ok(request);
-  assert.equal(new URLSearchParams(request.options.body).get('color'), '#34C5C5');
+  // Element.children is an HTMLCollection in browsers: iterable, but it has
+  // no Array.prototype.forEach method. Keep the fake DOM honest at this seam.
+  presets.children.forEach = undefined;
+
+  assert.doesNotThrow(() => green.onclick());
+  assert.deepEqual(changes, ['#00FF00']);
 });
 
-test('independent C3 palette click changes only the scene draft', () => {
+test('direct-target preset click preserves RGB channel meaning', async () => {
+  const { ui } = loadPageUi(statusWith('continuous'));
+  ui.setState(statusWith('continuous'));
+  ui.selectControlTarget('node:local-s3');
+  const control = ui.colorControl(['color', 'Primary', 'color', true]);
+  const green = findElement(control, item => item.value === '#00FF00');
+  green.onclick();
+  await new Promise(resolve => setTimeout(resolve, 190));
+
+  assert.equal(ui.getState().settings.color, '#00FF00');
+  const request = ui.getFetchCalls().find(call => call.url === '/api/target/lighting');
+  assert.ok(request);
+  assert.equal(new URLSearchParams(request.options.body).get('id'), 'local-s3');
+  assert.equal(new URLSearchParams(request.options.body).get('color'), '#00FF00');
+});
+
+test('independent C3 preset click keeps pure blue and changes only the scene draft', () => {
   const { ui } = loadPageUi(statusWith('continuous'));
   const draft = { settings: { color: '#FF5266' } };
   const control = ui.extensionColorControl(['color', 'Primary', 'color', true], draft, 'node-51930b93-color');
-  const blue = findElement(control, item => item.value === '#4B88F4');
+  const blue = findElement(control, item => item.value === '#0000FF');
   blue.onclick();
 
-  assert.equal(draft.settings.color, '#4B88F4');
+  assert.equal(draft.settings.color, '#0000FF');
   assert.equal(ui.getFetchCalls().some(call => call.url === '/api/node/lighting'), false);
 });
 
@@ -380,13 +416,14 @@ test('defines compact bento grid and range scale markup', () => {
   assert.match(source, /\.parameter-item--color\{grid-column:1;grid-row:span 2/);
   assert.match(source, /\.parameter-item--control\{grid-column:2/);
   assert.match(source, /parameter-grid--no-color/);
-  assert.match(source, /\.param-color \.color-wheel\{width:min\(100%,164px\)/);
+  assert.match(source, /\.param-color \.color-input\{width:100%/);
   assert.match(source, /grid-auto-rows:minmax\(min-content,auto\)/);
   assert.match(source, /\.range-scale\{display:flex;justify-content:space-between/);
   assert.match(source, /\.param output\{padding:4px 7px;border-radius:999px/);
-  assert.match(source, /\.color-palette\{display:grid;grid-template-columns:repeat\(9,minmax\(0,1fr\)\)/);
-  assert.match(source, /\.color-input-switch\{display:grid;grid-template-columns:1fr 1fr/);
-  assert.doesNotMatch(source, /color-preset/);
+  assert.match(source, /\.color-input\{display:grid;grid-template-columns:minmax\(72px,\.28fr\) minmax\(150px,1fr\)/);
+  assert.match(source, /\.color-presets\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(source, /\.color-spectrum\{position:relative/);
+  assert.doesNotMatch(source, /color-input-switch/);
   assert.match(source, /class="range-scale"/);
   assert.match(source, /parameterLayoutClass\(def\)/);
   assert.doesNotMatch(source, /parameter-row/);
@@ -425,7 +462,7 @@ test('renders grid items without wrapper rows', () => {
   assert.equal(items[1].children[0].className.includes('param-brightness'), true);
 });
 
-test('offers one light-node list with local and wireless node controls', () => {
+test('offers one physical-node list with the same geometry editor', () => {
   const source = readFileSync(new URL('../src/SpatialLightPage.cpp', import.meta.url), 'utf8');
 
   for (const required of [
@@ -434,12 +471,11 @@ test('offers one light-node list with local and wireless node controls', () => {
     'renderLightNodes',
     'renderLocalNodeControl',
     'renderRemoteNodeControl',
-    'setExtensionControlMode',
-    'syncExtensionLighting',
-    '/api/node/mode',
-    '/api/node/lighting',
-    '跟随空间',
-    '独立控制',
+    'nodeGeometryMarkup',
+    'saveLayout',
+    '/api/node/layout',
+    '灯珠空间映射',
+    '这里只管理 C3 的物理配置与固件',
   ]) {
     assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
       `missing light-node interaction: ${required}`);
@@ -454,7 +490,7 @@ test('exposes only space, light nodes, and hub system as top-level scopes', () =
   const tabs = [...source.matchAll(/data-tab="([^"]+)"/g)].map(match => match[1]);
 
   assert.deepEqual(tabs, ['space', 'nodes', 'system']);
-  for (const label of ['空间', '灯光节点', '中枢系统', '当前空间场景', '灯珠几何']) {
+  for (const label of ['灯光控制', '灯光节点', '中枢系统', '当前控制目标', '灯珠空间映射']) {
     assert.match(source, new RegExp(label));
   }
   assert.doesNotMatch(source, /主灯|副设备|同步主灯/);
@@ -511,7 +547,7 @@ test('offline wireless nodes keep their last-known configuration visible', async
 
   const panel = document.getElementById('nodeControlPanel').html;
   assert.match(panel, /已绑定 · 当前离线/);
-  assert.match(panel, /独立控制 · 71 颗灯珠/);
+  assert.match(panel, /71 颗灯珠 · 已绑定 · 当前离线/);
   assert.doesNotMatch(panel, /data-mode=/);
 });
 
@@ -775,14 +811,14 @@ test('opens a sixty-second add-node window from the hub system page', async () =
   assert.match(document.getElementById('systemMessage').textContent, /60/);
 });
 
-test('offers one local LED-count editor for each online light extension', () => {
+test('offers one full geometry editor for each online light node', () => {
   const source = readFileSync(new URL('../src/SpatialLightPage.cpp', import.meta.url), 'utf8');
 
   for (const required of [
-    'extensionLedCount',
-    'saveExtensionLedCount',
-    '/api/node/led-count',
-    '1 到 512',
+    'nodeGeometryMarkup',
+    'selectedLayoutKey',
+    '/api/node/layout',
+    '左／中／右分段',
   ]) {
     assert.match(source, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
       `missing C3 LED count editor: ${required}`);
@@ -804,7 +840,7 @@ test('offers firmware selection and progress only through the C3 OTA endpoint', 
   }
 });
 
-test('keeps the local node selected, then renders wireless-node mode controls', async () => {
+test('keeps the local node selected, then renders wireless-node physical controls', async () => {
   const nodeResponse = {
     ok: true,
     nodes: [
@@ -824,8 +860,9 @@ test('keeps the local node selected, then renders wireless-node mode controls', 
   cards[1].onclick();
   assert.equal(ui.getSelectedNodeId(), 'c3000042');
   assert.equal(ui.getSelectedRemoteNode().ledCount, 60);
-  assert.match(document.getElementById('nodeControlPanel').html, /跟随空间/);
-  assert.match(document.getElementById('nodeControlPanel').html, /独立控制/);
+  assert.match(document.getElementById('nodeControlPanel').html, /灯珠空间映射/);
+  assert.match(document.getElementById('nodeControlPanel').html, /这里只管理 C3 的物理配置与固件/);
+  assert.doesNotMatch(document.getElementById('nodeControlPanel').html, /data-mode=/);
 });
 
 test('makes leftover controls full width after the color pair', () => {

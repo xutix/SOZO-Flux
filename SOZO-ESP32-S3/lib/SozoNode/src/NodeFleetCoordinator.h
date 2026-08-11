@@ -40,7 +40,12 @@ class NodeFleetCoordinator {
   bool requestIndependentScene(node::NodeId nodeId,
                                const PersistedLightingState &state,
                                uint32_t nowMs);
+  bool requestDesiredScene(node::NodeId nodeId, const LightingScene &scene,
+                           uint32_t revision, uint32_t nowMs);
   bool requestNodeLedCount(node::NodeId nodeId, uint16_t ledCount,
+                           uint32_t nowMs);
+  bool requestNodeGeometry(node::NodeId nodeId,
+                           const node::LedGeometryPayload &geometry,
                            uint32_t nowMs);
   bool requestNodeFirmwareUpdate(node::NodeId nodeId, const uint8_t *image,
                                  size_t imageSize, const uint8_t sha256[32],

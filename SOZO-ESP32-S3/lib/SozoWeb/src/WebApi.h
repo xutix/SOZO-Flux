@@ -6,6 +6,8 @@
 #include <AudioAnalyzer.h>
 #include <CommandRouter.h>
 #include <NetworkManager.h>
+#include <LightingSceneOrchestrator.h>
+#include <LightingSceneStore.h>
 #include <NodeNameStore.h>
 #include <NodeFleetCoordinator.h>
 
@@ -18,7 +20,8 @@ class WebApi {
 
   WebApi(CommandRouter &commands, NetworkManager &network,
          AudioAnalyzer &audio, NodeFleetCoordinator &nodes,
-         NodeNameStore &nodeNames,
+         NodeNameStore &nodeNames, LightingSceneOrchestrator &scenes,
+         LightingSceneStore &sceneStore,
          PageBuilder spatialPage,
          RestartCallback restart);
 
@@ -41,7 +44,14 @@ class WebApi {
   void handleSetNodeMode();
   void handleSetNodeLighting();
   void handleSetNodeLedCount();
+  void handleSetNodeLayout();
   void handleSetNodeName();
+  void handleGetScenes();
+  void handleSaveScene();
+  void handleSetSceneAssignment();
+  void handleActivateScene();
+  void handleDeleteScene();
+  void handleSetTargetLighting();
   void handleNodeFirmwareUpload();
   void handleNodeFirmwareUploadData();
   void handleGetNodeFirmwareStatus();
@@ -70,6 +80,8 @@ class WebApi {
   AudioAnalyzer &audio_;
   NodeFleetCoordinator &nodes_;
   NodeNameStore &nodeNames_;
+  LightingSceneOrchestrator &scenes_;
+  LightingSceneStore &sceneStore_;
   PageBuilder spatialPage_;
   RestartCallback restart_;
   uint8_t *nodeFirmwareImage_{nullptr};

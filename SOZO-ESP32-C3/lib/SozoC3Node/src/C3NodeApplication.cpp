@@ -56,9 +56,13 @@ bool C3NodeApplication::begin(const node::NodeId nodeId,
   if (ledCountState_.schemaVersion != NodeLedCountState::kSchemaVersion ||
       ledCountState_.ledCount == 0U ||
       ledCountState_.ledCount > profile_.maxLedCount) {
+    ledCountState_ = NodeLedCountState{};
     ledCountState_.ledCount = profile_.defaultLedCount;
+    ledCountState_.centerIndex =
+        static_cast<uint16_t>((profile_.defaultLedCount - 1U) / 2U);
+    ledCountState_.centerCount = profile_.defaultLedCount;
   }
-  lighting_.begin(makeLocalState(ledCountState_.ledCount));
+  lighting_.begin(makeLocalState(ledCountState_));
   sceneRuntime_.restoreControlState(controls_.load());
   binding_ = bindings_.load();
   if (!transport_.begin(nodeId_, makeCapabilities(), binding_.bound,
@@ -115,17 +119,21 @@ uint32_t C3NodeApplication::lastAppliedSceneRevision() const {
   return sceneRuntime_.lastAppliedSceneRevision();
 }
 
+spatial_light::SpatialLayout C3NodeApplication::makeSpatialLayout(
+    const NodeLedCountState &layout) const {
+  return {static_cast<spatial_light::LayoutProfile>(layout.layoutProfile),
+          layout.ledCount,
+          layout.centerIndex,
+          layout.leftCount,
+          layout.centerCount,
+          layout.rightCount,
+          layout.reversed};
+}
+
 PersistedLightingState C3NodeApplication::makeLocalState(
-    const uint16_t ledCount) const {
+    const NodeLedCountState &layout) const {
   PersistedLightingState state = makeDefaultPersistedLightingState();
-  state.layout.profile = spatial_light::LayoutProfile::Continuous;
-  state.layout.activeCount = ledCount;
-  state.layout.centerIndex =
-      static_cast<uint16_t>((ledCount - 1U) / 2U);
-  state.layout.leftCount = 0;
-  state.layout.centerCount = ledCount;
-  state.layout.rightCount = 0;
-  state.layout.reversed = false;
+  state.layout = makeSpatialLayout(layout);
   return state;
 }
 
@@ -230,13 +238,46 @@ void C3NodeApplication::handleInbound(const node::Envelope &envelope,
       uint16_t errorCode = accepted ? 0U : 6U;
       if (accepted) {
         const NodeLedCountState previous = ledCountState_;
-        const NodeLedCountState next{NodeLedCountState::kSchemaVersion,
-                                     payload.ledCount};
+        NodeLedCountState next{};
+        next.ledCount = payload.ledCount;
+        next.centerIndex = static_cast<uint16_t>((payload.ledCount - 1U) / 2U);
+        next.centerCount = payload.ledCount;
         if (!sceneRuntime_.setLocalLedCount(next.ledCount)) {
           accepted = false;
           errorCode = 6U;
         } else if (!ledCounts_.save(next)) {
           sceneRuntime_.setLocalLedCount(previous.ledCount);
+          accepted = false;
+          errorCode = 7U;
+        } else {
+          ledCountState_ = next;
+        }
+      }
+      sendCommandReceipt(envelope, accepted, errorCode, nowMs);
+      break;
+    }
+    case node::MessageType::LedGeometryRequest: {
+      node::LedGeometryPayload payload{};
+      bool accepted =
+          node::readLedGeometryRequest(envelope, payload) ==
+              node::CodecResult::Ok &&
+          payload.activeCount <= profile_.maxLedCount;
+      uint16_t errorCode = accepted ? 0U : 6U;
+      if (accepted) {
+        const NodeLedCountState previous = ledCountState_;
+        NodeLedCountState next{};
+        next.ledCount = payload.activeCount;
+        next.layoutProfile = payload.layoutProfile;
+        next.centerIndex = payload.centerIndex;
+        next.leftCount = payload.leftCount;
+        next.centerCount = payload.centerCount;
+        next.rightCount = payload.rightCount;
+        next.reversed = (payload.spatialFlags & node::kSpatialFlagReversed) != 0U;
+        if (!sceneRuntime_.setLocalLayout(makeSpatialLayout(next))) {
+          accepted = false;
+          errorCode = 6U;
+        } else if (!ledCounts_.save(next)) {
+          sceneRuntime_.setLocalLayout(makeSpatialLayout(previous));
           accepted = false;
           errorCode = 7U;
         } else {
@@ -373,6 +414,12 @@ void C3NodeApplication::sendStatusSnapshot(const node::Envelope &request,
   status.controlMode = sceneRuntime_.controlMode();
   status.pairingWindowOpen = pairingWindow_.isOpen();
   status.ledCount = ledCountState_.ledCount;
+  status.layoutProfile = ledCountState_.layoutProfile;
+  status.centerIndex = ledCountState_.centerIndex;
+  status.leftCount = ledCountState_.leftCount;
+  status.centerCount = ledCountState_.centerCount;
+  status.rightCount = ledCountState_.rightCount;
+  status.spatialFlags = ledCountState_.reversed ? node::kSpatialFlagReversed : 0U;
 
   node::Envelope response{};
   response.channelId = request.channelId;

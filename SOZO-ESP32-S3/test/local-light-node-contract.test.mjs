@@ -5,12 +5,16 @@ import test from 'node:test';
 const read = (path) =>
   readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('S3 local strip is an optional consumer of the shared space scene', async () => {
+test('S3 local strip is an optional independently addressed lighting target', async () => {
   const main = await read('src/main.cpp');
   assert.match(main, /SOZO_LOCAL_LIGHT_ENABLED/);
   assert.match(main, /LightNodeRuntime localLightNode/);
-  assert.match(main, /localLightNode\.applyScene\(scene\.lighting/);
+  assert.match(main, /LocalLightingTargetAdapter/);
+  assert.match(main, /runtime_\.applyScene\(/);
+  assert.match(main, /LightSceneTarget::Independent/);
+  assert.match(main, /SceneDeliveryCoordinator sceneDelivery/);
   assert.match(main, /nodeCoordinator\.tick\(now, scene, audio\)/);
+  assert.match(main, /sceneDelivery\.tick\(now\)/);
   assert.doesNotMatch(main, /CommandRouter commandRouter\(lightingController/);
 });
 

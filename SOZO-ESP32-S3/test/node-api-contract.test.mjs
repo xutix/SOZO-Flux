@@ -29,13 +29,28 @@ test('/api/nodes keeps its existing fields and exposes BLE worker diagnostics', 
   }
 });
 
-test('provides device-scoped endpoints for control mode and independent scenes', () => {
+test('retains legacy device endpoints while scenes use desired per-target state', () => {
   assert.match(source, /"\/api\/node\/mode"/);
   assert.match(source, /"\/api\/node\/lighting"/);
   assert.match(source, /handleSetNodeMode/);
   assert.match(source, /handleSetNodeLighting/);
   assert.match(source, /requestNodeControlMode/);
   assert.match(source, /requestIndependentScene/);
+});
+
+test('provides named scenes with independently editable node assignments', () => {
+  for (const endpoint of [
+    '/api/scenes',
+    '/api/scene',
+    '/api/scene/assignment',
+    '/api/scene/activate',
+    '/api/target/lighting',
+  ]) {
+    assert.match(source, new RegExp(`"${endpoint.replaceAll('/', '\\/')}"`));
+  }
+  assert.match(source, /handleSetSceneAssignment/);
+  assert.match(source, /target is not a member of this scene/);
+  assert.match(source, /sourceSceneId/);
 });
 
 test('/api/status identifies the Flux Hub and optional local light node', () => {
@@ -49,6 +64,11 @@ test('/api/status identifies the Flux Hub and optional local light node', () => 
     assert.match(source, new RegExp(`\\\\"${field}\\\\"`),
       `missing /api/status field: ${field}`);
   }
+});
+
+test('serves the embedded control page without stale browser caching', () => {
+  assert.match(source, /sendHeader\("Cache-Control", "no-store, no-cache, must-revalidate"\)/);
+  assert.match(source, /sendHeader\("Pragma", "no-cache"\)/);
 });
 
 test('/api/nodes exposes light capability without leaking its bit mask to the UI', () => {
@@ -112,10 +132,16 @@ test('independent scene request applies the selected effect to the scene state',
   );
 });
 
-test('provides one device-scoped endpoint for the C3 LED count', () => {
+test('provides full device-scoped geometry while retaining LED-count compatibility', () => {
   assert.match(source, /"\/api\/node\/led-count"/);
   assert.match(source, /handleSetNodeLedCount/);
   assert.match(source, /requestNodeLedCount/);
+  assert.match(source, /"\/api\/node\/layout"/);
+  assert.match(source, /handleSetNodeLayout/);
+  assert.match(source, /requestNodeGeometry/);
+  for (const field of ['layout', 'centerIndex', 'leftCount', 'centerCount', 'rightCount', 'reversed']) {
+    assert.match(source, new RegExp(`\\\\"${field}\\\\"`));
+  }
 });
 
 test('provides one encrypted BLE firmware workflow for OTA-capable C3 nodes', () => {

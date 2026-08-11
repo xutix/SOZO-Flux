@@ -12,26 +12,31 @@ Flux Hub、ESP32-C3 远程灯光节点和平台无关的共享核心组成第一
 
 当前版本为 `v0.1.0-alpha`。它适合开发、验证与小规模硬件实验，尚不承诺生产稳定性。
 
+> **固件来源与设备身份不可随普通开发变更。** 正式 S3/C3 固件只能从本仓库的
+> `SOZO-ESP32-S3/` 和 `SOZO-ESP32-C3/` 构建；不得使用仓库外的旧工程或实验副本烧录。
+> S3 的固定局域网入口是 <http://sozo-flux.local>。完整的烧录前后检查见
+> [项目身份与烧录保护](docs/PROJECT-GUARDRAILS.md)。
+
 ## 系统结构
 
 ```text
-Web / Serial / future Desktop App
+Web / Serial / future Voice App
                 |
          Control Command
                 |
        ESP32-S3 Flux Hub
            Coordinator
                 |
-       Authoritative Space Scene
-             /             \
- S3 Local Light Node    Flux node bus
-                              |
-                      C3 Remote Light Node
+ Named Scenes + Per-node Desired Lighting State
+             /                         \
+ S3 Local Light Target             Flux node bus
+                                         |
+                                 C3 Light Targets
 
 Shared by both devices: domain + scene + lighting + protocol + bus core
 ```
 
-控制入口只能产生 `ControlCommand`，由协调器校验并更新权威状态，再由能力处理器和硬件
+控制入口只能产生受校验的场景或节点目标状态，由协调器更新对应灯带，再由能力处理器和硬件
 适配器执行。网页、串口、BLE 或未来桌面软件不得直接写 GPIO、LED 状态或 NVS。
 
 ## 仓库组成

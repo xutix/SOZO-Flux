@@ -51,15 +51,10 @@ void NodeCoordinator::tick(const uint32_t nowMs,
     return;
   }
 
-  if (sceneSentGeneration_ != transport_.readyGeneration() ||
-      acknowledgedSceneRevision_ != sceneRevision_) {
-    sendScene(nowMs);
-  }
-  if (acknowledgedSceneRevision_ == sceneRevision_ &&
-      statusRequestedGeneration_ != transport_.readyGeneration()) {
+  if (statusRequestedGeneration_ != transport_.readyGeneration()) {
     requestStatus(nowMs);
   }
-  sendAudio(nowMs, scene.lighting.mode, audioFrame);
+  sendAudio(nowMs, desiredEffectMode_, audioFrame);
 }
 
 const NodeRegistry &NodeCoordinator::registry() const { return registry_; }
@@ -116,16 +111,22 @@ bool NodeCoordinator::requestNodeControlMode(const node::NodeId nodeId,
 bool NodeCoordinator::requestIndependentScene(
     const node::NodeId nodeId, const PersistedLightingState &state,
     const uint32_t nowMs) {
+  ++independentSceneRevision_;
+  if (independentSceneRevision_ == 0U) ++independentSceneRevision_;
+  return requestDesiredScene(nodeId, makeLightingScene(state),
+                             independentSceneRevision_, nowMs);
+}
+
+bool NodeCoordinator::requestDesiredScene(
+    const node::NodeId nodeId, const LightingScene &desiredScene,
+    const uint32_t revision, const uint32_t nowMs) {
   const NodeRecord *record = registry_.find(nodeId);
   if (!isAvailableLightNode(nodeId) || record == nullptr ||
       record->status.controlMode != node::NodeControlMode::Independent ||
-      pendingIndependentSceneCorrelation_ != 0) {
+      pendingIndependentSceneCorrelation_ != 0 || revision == 0U) {
     return false;
   }
-  node::SceneSnapshotPayload scene =
-      makeSceneSnapshot(makeLightingScene(state));
-  ++independentSceneRevision_;
-  if (independentSceneRevision_ == 0U) ++independentSceneRevision_;
+  const node::SceneSnapshotPayload scene = makeSceneSnapshot(desiredScene);
   node::Envelope envelope{};
   envelope.messageType = node::MessageType::SceneSnapshot;
   envelope.channelId =
@@ -135,7 +136,7 @@ bool NodeCoordinator::requestIndependentScene(
   envelope.targetNodeId = nodeId;
   envelope.sequence = outboundSequence_++;
   envelope.timestampMs = nowMs;
-  envelope.sceneRevision = independentSceneRevision_;
+  envelope.sceneRevision = revision;
   envelope.correlationId = correlationSequence_++;
   if (node::writeSceneSnapshot(envelope, scene) != node::CodecResult::Ok ||
       bus_.awaitResponse(envelope.correlationId,
@@ -149,6 +150,7 @@ bool NodeCoordinator::requestIndependentScene(
     return false;
   }
   pendingIndependentSceneCorrelation_ = envelope.correlationId;
+  desiredEffectMode_ = desiredScene.mode;
   return true;
 }
 
@@ -173,6 +175,38 @@ bool NodeCoordinator::requestNodeLedCount(const node::NodeId nodeId,
   envelope.timestampMs = nowMs;
   envelope.correlationId = correlationSequence_++;
   if (node::writeLedCountRequest(envelope, payload) != node::CodecResult::Ok ||
+      bus_.awaitResponse(envelope.correlationId,
+                         nowMs + kSceneReceiptTimeoutMs, onLedCountReceipt,
+                         this) != node::BusResult::Ok) {
+    return false;
+  }
+  if (!transport_.send(envelope)) {
+    bus_.cancelResponse(envelope.correlationId);
+    return false;
+  }
+  pendingLedCountCorrelation_ = envelope.correlationId;
+  return true;
+}
+
+bool NodeCoordinator::requestNodeGeometry(
+    const node::NodeId nodeId, const node::LedGeometryPayload &geometry,
+    const uint32_t nowMs) {
+  const NodeRecord *record = registry_.find(nodeId);
+  if (!isAvailableLightNode(nodeId) || record == nullptr ||
+      geometry.activeCount > record->capabilities.maxLedCount ||
+      pendingLedCountCorrelation_ != 0U) {
+    return false;
+  }
+  node::Envelope envelope{};
+  envelope.channelId = static_cast<uint16_t>(node::ServiceId::SetLedGeometry);
+  envelope.flags = node::kFlagRequiresAck;
+  envelope.sourceNodeId = node::kCoordinatorNodeId;
+  envelope.targetNodeId = nodeId;
+  envelope.sequence = outboundSequence_++;
+  envelope.timestampMs = nowMs;
+  envelope.correlationId = correlationSequence_++;
+  if (node::writeLedGeometryRequest(envelope, geometry) !=
+          node::CodecResult::Ok ||
       bus_.awaitResponse(envelope.correlationId,
                          nowMs + kSceneReceiptTimeoutMs, onLedCountReceipt,
                          this) != node::BusResult::Ok) {

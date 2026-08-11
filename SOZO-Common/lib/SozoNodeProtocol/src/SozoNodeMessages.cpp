@@ -315,6 +315,12 @@ CodecResult writeStatusSnapshot(Envelope &envelope,
   writer.u8(static_cast<uint8_t>(payload.controlMode));
   writer.boolean(payload.pairingWindowOpen);
   writer.u16(payload.ledCount);
+  writer.u8(payload.layoutProfile);
+  writer.u16(payload.centerIndex);
+  writer.u16(payload.leftCount);
+  writer.u16(payload.centerCount);
+  writer.u16(payload.rightCount);
+  writer.u8(payload.spatialFlags);
   return CodecResult::Ok;
 }
 
@@ -331,6 +337,12 @@ CodecResult readStatusSnapshot(const Envelope &envelope,
   payload.controlMode = static_cast<NodeControlMode>(reader.u8());
   payload.pairingWindowOpen = reader.boolean();
   payload.ledCount = reader.u16();
+  payload.layoutProfile = reader.u8();
+  payload.centerIndex = reader.u16();
+  payload.leftCount = reader.u16();
+  payload.centerCount = reader.u16();
+  payload.rightCount = reader.u16();
+  payload.spatialFlags = reader.u8();
   return CodecResult::Ok;
 }
 
@@ -392,6 +404,47 @@ CodecResult readLedCountRequest(const Envelope &envelope,
   payload.ledCount = reader.u16();
   return payload.ledCount == 0U ? CodecResult::InvalidPayload
                                 : CodecResult::Ok;
+}
+
+CodecResult writeLedGeometryRequest(Envelope &envelope,
+                                    const LedGeometryPayload &payload) {
+  const uint32_t segmentedTotal = static_cast<uint32_t>(payload.leftCount) +
+                                  payload.centerCount + payload.rightCount;
+  if (payload.activeCount == 0U || payload.layoutProfile > 1U ||
+      (payload.layoutProfile == 0U &&
+       payload.centerIndex >= payload.activeCount) ||
+      (payload.layoutProfile == 1U &&
+       (payload.centerCount == 0U || segmentedTotal != payload.activeCount))) {
+    return CodecResult::InvalidPayload;
+  }
+  envelope.messageType = MessageType::LedGeometryRequest;
+  PayloadWriter writer(envelope);
+  writer.u8(payload.layoutProfile);
+  writer.u16(payload.activeCount);
+  writer.u16(payload.centerIndex);
+  writer.u16(payload.leftCount);
+  writer.u16(payload.centerCount);
+  writer.u16(payload.rightCount);
+  writer.u8(payload.spatialFlags);
+  return CodecResult::Ok;
+}
+
+CodecResult readLedGeometryRequest(const Envelope &envelope,
+                                   LedGeometryPayload &payload) {
+  const CodecResult result = validate(envelope, MessageType::LedGeometryRequest,
+                                      kLedGeometryWireBytes);
+  if (result != CodecResult::Ok) return result;
+  PayloadReader reader(envelope);
+  payload = LedGeometryPayload{};
+  payload.layoutProfile = reader.u8();
+  payload.activeCount = reader.u16();
+  payload.centerIndex = reader.u16();
+  payload.leftCount = reader.u16();
+  payload.centerCount = reader.u16();
+  payload.rightCount = reader.u16();
+  payload.spatialFlags = reader.u8();
+  Envelope validationEnvelope{};
+  return writeLedGeometryRequest(validationEnvelope, payload);
 }
 
 CodecResult writeFirmwareBegin(Envelope &envelope,

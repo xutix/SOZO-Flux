@@ -31,7 +31,12 @@ class NodeCoordinator {
   bool requestIndependentScene(node::NodeId nodeId,
                                const PersistedLightingState &state,
                                uint32_t nowMs);
+  bool requestDesiredScene(node::NodeId nodeId, const LightingScene &scene,
+                           uint32_t revision, uint32_t nowMs);
   bool requestNodeLedCount(node::NodeId nodeId, uint16_t ledCount,
+                           uint32_t nowMs);
+  bool requestNodeGeometry(node::NodeId nodeId,
+                           const node::LedGeometryPayload &geometry,
                            uint32_t nowMs);
   bool requestNodeFirmwareUpdate(node::NodeId nodeId, const uint8_t *image,
                                  size_t imageSize, const uint8_t sha256[32],
@@ -89,6 +94,7 @@ class NodeCoordinator {
   uint32_t independentSceneRevision_{0};
   uint32_t lastAudioSentMs_{0};
   uint32_t lastTickMs_{0};
+  EffectMode desiredEffectMode_{EffectMode::Off};
   node::NodeId activeNodeId_{0};
   NodeFirmwareTransfer firmwareTransfer_;
   uint32_t firmwareReadyGeneration_{0U};

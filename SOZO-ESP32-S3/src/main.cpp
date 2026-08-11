@@ -9,9 +9,12 @@
 #include <LightNodeRuntime.h>
 #include <LightingController.h>
 #include <LightingControllerNodeSink.h>
+#include <LightingSceneOrchestrator.h>
+#include <LightingSceneStore.h>
 #include <NetworkManager.h>
 #include <NodeNameStore.h>
 #include <NodeFleetCoordinator.h>
+#include <SceneDeliveryCoordinator.h>
 #include <SerialConsole.h>
 #include <SettingsStore.h>
 #include <S3LightingOutput.h>
@@ -41,6 +44,8 @@ constexpr uint32_t kSerialReportIntervalMs = 500;
 
 sozo::SettingsStore settingsStore;
 sozo::NodeNameStore nodeNameStore;
+sozo::LightingSceneStore lightingSceneStore;
+sozo::LightingSceneOrchestrator lightingScenes;
 sozo::NetworkManager networkManager(settingsStore);
 sozo::SpaceSceneCoordinator sceneCoordinator;
 #if SOZO_LOCAL_LIGHT_ENABLED
@@ -49,22 +54,57 @@ sozo::s3::S3LightingOutput lightingOutput(spatial_light::kMaxLedCount,
 sozo::LightingController lightingController(lightingOutput);
 sozo::LightingControllerNodeSink localLightSink(lightingController);
 sozo::LightNodeRuntime localLightNode(localLightSink);
+
+class LocalLightingTargetAdapter final : public sozo::LocalLightingTarget {
+ public:
+  explicit LocalLightingTargetAdapter(sozo::LightNodeRuntime &runtime)
+      : runtime_(runtime) {}
+  bool available() const override { return true; }
+  bool apply(const sozo::LightingScene &scene, const uint32_t revision,
+             const uint32_t nowMs) override {
+    runtime_.setControlMode(sozo::node::NodeControlMode::Independent);
+    const sozo::LightSceneApplyResult result = runtime_.applyScene(
+        scene, revision, nowMs, nowMs, sozo::LightSceneTarget::Independent);
+    return result == sozo::LightSceneApplyResult::Applied ||
+           result == sozo::LightSceneApplyResult::Duplicate;
+  }
+
+ private:
+  sozo::LightNodeRuntime &runtime_;
+};
+
+LocalLightingTargetAdapter localLightingTarget(localLightNode);
+#else
+class LocalLightingTargetAdapter final : public sozo::LocalLightingTarget {
+ public:
+  bool available() const override { return false; }
+  bool apply(const sozo::LightingScene &, uint32_t, uint32_t) override {
+    return false;
+  }
+};
+
+LocalLightingTargetAdapter localLightingTarget;
 #endif
 sozo::AudioAnalyzer audioAnalyzer;
 sozo::CommandRouter commandRouter(sceneCoordinator, settingsStore);
 sozo::BleFleetAdapter bleNodeTransport;
 sozo::NodeFleetCoordinator nodeCoordinator(bleNodeTransport);
+sozo::SceneDeliveryCoordinator sceneDelivery(lightingScenes,
+                                              localLightingTarget,
+                                              nodeCoordinator);
 sozo::SerialConsole serialConsole(Serial, commandRouter);
 Adafruit_NeoPixel statusLed(kStatusLedCount, kStatusLedPin,
                             NEO_GRB + NEO_KHZ800);
 
 void restartDevice();
 sozo::WebApi webApi(commandRouter, networkManager, audioAnalyzer,
-                    nodeCoordinator, nodeNameStore,
+                    nodeCoordinator, nodeNameStore, lightingScenes,
+                    lightingSceneStore,
                     buildSpatialLightPage, restartDevice);
 
 uint32_t lastSerialReport = 0;
 uint32_t lastLocalLightConfigRevision = 0U;
+uint32_t lastLegacySceneRevision = 0U;
 bool otaAvailable = false;
 uint8_t lastOtaProgressPercent = 255;
 
@@ -155,7 +195,7 @@ void initLocalLightNode() {
   const sozo::SpaceSceneSnapshot &scene = sceneCoordinator.snapshot();
   const uint32_t now = millis();
   localLightNode.begin(state);
-  localLightNode.applyScene(scene.lighting, scene.revision, now, now);
+  localLightNode.setControlMode(sozo::node::NodeControlMode::Independent);
   lastLocalLightConfigRevision =
       sceneCoordinator.localLightConfiguration().revision;
 #endif
@@ -165,9 +205,37 @@ void loadConfiguration() {
   const sozo::PersistedLightingState state = settingsStore.loadLightingState();
   sceneCoordinator.begin(state);
   audioAnalyzer.setTuning(state.audio);
+  lastLegacySceneRevision = sceneCoordinator.snapshot().revision;
+  if (!lightingSceneStore.load(lightingScenes)) {
+#if SOZO_LOCAL_LIGHT_ENABLED
+    sozo::NamedLightingScene defaultScene{};
+    defaultScene.id = 1U;
+    defaultScene.setName("默认空间");
+    defaultScene.assignments[0] = {sozo::kLocalLightingTargetId,
+                                   sceneCoordinator.snapshot().lighting};
+    defaultScene.assignmentCount = 1U;
+    lightingScenes.saveScene(defaultScene);
+    lightingScenes.activateScene(defaultScene.id);
+    lightingSceneStore.save(lightingScenes);
+#endif
+  } else if (
+#if SOZO_LOCAL_LIGHT_ENABLED
+      lightingScenes.desiredFor(sozo::kLocalLightingTargetId) == nullptr
+#else
+      false
+#endif
+  ) {
+    lightingScenes.applyDirect(sozo::kLocalLightingTargetId,
+                               sceneCoordinator.snapshot().lighting);
+    lightingSceneStore.save(lightingScenes);
+  }
 }
 
-void saveConfigurationIfReady() { commandRouter.tick(millis()); }
+void saveConfigurationIfReady() {
+  const uint32_t now = millis();
+  commandRouter.tick(now);
+  lightingSceneStore.tick(now, lightingScenes);
+}
 
 void printSystemInfo() {
   const bool hasPsram = psramFound();
@@ -340,6 +408,13 @@ void loop() {
   const sozo::AudioFrame &audio = audioAnalyzer.snapshot().frame;
   const sozo::SpaceSceneSnapshot &scene = sceneCoordinator.snapshot();
 #if SOZO_LOCAL_LIGHT_ENABLED
+  if (scene.revision != lastLegacySceneRevision) {
+    lightingScenes.applyDirect(sozo::kLocalLightingTargetId, scene.lighting);
+    lightingSceneStore.markDirty(now);
+    lastLegacySceneRevision = scene.revision;
+  }
+#endif
+#if SOZO_LOCAL_LIGHT_ENABLED
   const sozo::LocalLightConfiguration &configuration =
       sceneCoordinator.localLightConfiguration();
   if (configuration.revision != lastLocalLightConfigRevision) {
@@ -347,11 +422,14 @@ void loop() {
         configuration, sceneCoordinator.lightingState().audio);
     lastLocalLightConfigRevision = configuration.revision;
   }
-  localLightNode.applyScene(scene.lighting, scene.revision, now, now);
+  nodeCoordinator.tick(now, scene, audio);
+  sceneDelivery.tick(now);
   localLightNode.applyAudioFrame(audio, audio.framesRead);
   localLightNode.tick(now);
-#endif
+#else
   nodeCoordinator.tick(now, scene, audio);
+  sceneDelivery.tick(now);
+#endif
   networkManager.tick();
   printRuntimeStatus();
   delay(1);

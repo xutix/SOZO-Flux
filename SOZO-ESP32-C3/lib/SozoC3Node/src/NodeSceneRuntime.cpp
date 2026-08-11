@@ -63,6 +63,11 @@ bool NodeSceneRuntime::setLocalLedCount(const uint16_t ledCount) {
   return runtime_.setLocalLedCount(ledCount);
 }
 
+bool NodeSceneRuntime::setLocalLayout(
+    const spatial_light::SpatialLayout &layout) {
+  return runtime_.setLocalLayout(layout);
+}
+
 bool NodeSceneRuntime::setControlMode(const node::NodeControlMode mode) {
   return runtime_.setControlMode(mode);
 }

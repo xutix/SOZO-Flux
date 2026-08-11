@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Flux Protocol 2 adds complete LED geometry exchange and per-node scene delivery state for S3/C3 lighting orchestration.
+
 - C3 `0.2.1-alpha` 支持通过已绑定且加密的 BLE 连接更新固件。
 - Gateway 网页新增按节点选择固件、传输进度和错误状态；同一时间只更新一个 C3，其它节点保持在线。
 - C3 在备用 OTA 分区写入，完整大小与 SHA-256 校验通过后才切换并重启；断链、超时或校验失败继续保留旧固件。

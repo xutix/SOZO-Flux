@@ -61,10 +61,23 @@ bool LightNodeRuntime::setLocalLedCount(const uint16_t ledCount) {
       ledCount,
       0U,
       false};
+  return setLocalLayout(layout);
+}
+
+bool LightNodeRuntime::setLocalLayout(
+    const spatial_light::SpatialLayout &layout) {
+  const spatial_light::SpatialLayout normalized =
+      spatial_light::normalizeLayout(layout);
+  if (normalized.activeCount != layout.activeCount ||
+      normalized.profile != layout.profile ||
+      (layout.profile == spatial_light::LayoutProfile::Continuous &&
+       normalized.centerIndex != layout.centerIndex)) {
+    return false;
+  }
   PersistedLightingState next = lighting_.state();
-  next.layout = layout;
-  if (followScene_.available) followScene_.state.layout = layout;
-  if (independentScene_.available) independentScene_.state.layout = layout;
+  next.layout = normalized;
+  if (followScene_.available) followScene_.state.layout = normalized;
+  if (independentScene_.available) independentScene_.state.layout = normalized;
   lighting_.applyState(next);
   return true;
 }

@@ -13,6 +13,7 @@
 namespace {
 
 using sozo::EffectMode;
+using sozo::LightingScene;
 using sozo::PersistedLightingState;
 
 constexpr uint16_t kMaxLedCount = spatial_light::kMaxLedCount;
@@ -156,7 +157,8 @@ bool parseMode(const String &value, EffectMode &mode) {
 }
 
 bool parseLightingEffect(const String &value, EffectMode &mode) {
-  if (value == "SOLID") mode = EffectMode::Static;
+  if (value == "OFF") mode = EffectMode::Off;
+  else if (value == "SOLID") mode = EffectMode::Static;
   else if (value == "RAINBOW") mode = EffectMode::Rainbow;
   else if (value == "COMET") mode = EffectMode::Comet;
   else if (value == "AUDIO") mode = EffectMode::Music;
@@ -231,6 +233,56 @@ bool supportedLightingArgument(const String &name) {
          name == "animationBrightness" || name == "audioSource";
 }
 
+void appendLightingSceneJson(String &json, const LightingScene &scene) {
+  char primary[8];
+  char secondary[8];
+  snprintf(primary, sizeof(primary), "#%02X%02X%02X", scene.primaryColor.red,
+           scene.primaryColor.green, scene.primaryColor.blue);
+  snprintf(secondary, sizeof(secondary), "#%02X%02X%02X",
+           scene.settings.secondaryRed, scene.settings.secondaryGreen,
+           scene.settings.secondaryBlue);
+  json += F("{\"effect\":\"");
+  json += lightingEffectId(scene.mode);
+  json += F("\",\"settings\":{\"brightness\":");
+  json += scene.brightness;
+  json += F(",\"color\":\"");
+  json += primary;
+  json += F("\",\"rainbowStyle\":");
+  json += scene.settings.rainbowStyle;
+  json += F(",\"flowSpeed\":");
+  json += scene.settings.flowSpeed;
+  json += F(",\"cometTail\":");
+  json += scene.settings.cometTail;
+  json += F(",\"cometSpeed\":");
+  json += scene.settings.cometSpeed;
+  json += F(",\"cometDensity\":");
+  json += scene.settings.cometDensity;
+  json += F(",\"cometBackground\":");
+  json += scene.settings.cometBackground;
+  json += F(",\"effectFlags\":");
+  json += scene.settings.cometRandom ? 1 : 0;
+  json += F(",\"sensitivityX100\":");
+  json += scene.settings.audioSensitivityX100;
+  json += F(",\"style\":");
+  json += scene.mode == EffectMode::Comet ? scene.cometColorStyle
+                                          : scene.audioColorStyle;
+  json += F(",\"audioColorGainX100\":");
+  json += scene.settings.audioColorGainX100;
+  json += F(",\"audioHueDrive\":");
+  json += scene.settings.audioHueDrive;
+  json += F(",\"breathFloorPercent\":");
+  json += scene.settings.breathFloorPercent;
+  json += F(",\"secondaryColor\":\"");
+  json += secondary;
+  json += F("\",\"pulseAmplitudePercent\":");
+  json += scene.settings.pulseAmplitudePercent;
+  json += F(",\"pulseHeightPercent\":");
+  json += scene.settings.pulseHeightPercent;
+  json += F(",\"animationBrightness\":");
+  json += scene.settings.animationBrightness;
+  json += F("}}");
+}
+
 String buildProvisioningPage() {
   static const char page[] PROGMEM = R"HTML(
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
@@ -253,10 +305,15 @@ document.getElementById('setupForm').addEventListener('submit',async event=>{eve
 
 namespace sozo {
 
+bool parseLightingTargetId(const String &value, LightingTargetId &targetId);
+String lightingTargetId(LightingTargetId targetId);
+bool parseSceneId(const String &value, LightingSceneId &sceneId,
+                  bool allowZero = false);
+
 WebApi::WebApi(CommandRouter &commands, NetworkManager &network,
                AudioAnalyzer &audio, NodeFleetCoordinator &nodes,
-               NodeNameStore &nodeNames,
-               const PageBuilder spatialPage,
+               NodeNameStore &nodeNames, LightingSceneOrchestrator &scenes,
+               LightingSceneStore &sceneStore, const PageBuilder spatialPage,
                const RestartCallback restart)
     : server_(80),
       commands_(commands),
@@ -264,6 +321,8 @@ WebApi::WebApi(CommandRouter &commands, NetworkManager &network,
       audio_(audio),
       nodes_(nodes),
       nodeNames_(nodeNames),
+      scenes_(scenes),
+      sceneStore_(sceneStore),
       spatialPage_(spatialPage),
       restart_(restart) {}
 
@@ -303,8 +362,20 @@ void WebApi::registerRoutes() {
              [this]() { handleSetNodeLighting(); });
   server_.on("/api/node/led-count", HTTP_POST,
              [this]() { handleSetNodeLedCount(); });
+  server_.on("/api/node/layout", HTTP_POST,
+             [this]() { handleSetNodeLayout(); });
   server_.on("/api/node/name", HTTP_POST,
              [this]() { handleSetNodeName(); });
+  server_.on("/api/scenes", HTTP_GET, [this]() { handleGetScenes(); });
+  server_.on("/api/scene", HTTP_POST, [this]() { handleSaveScene(); });
+  server_.on("/api/scene/assignment", HTTP_POST,
+             [this]() { handleSetSceneAssignment(); });
+  server_.on("/api/scene/activate", HTTP_POST,
+             [this]() { handleActivateScene(); });
+  server_.on("/api/scene/delete", HTTP_POST,
+             [this]() { handleDeleteScene(); });
+  server_.on("/api/target/lighting", HTTP_POST,
+             [this]() { handleSetTargetLighting(); });
   server_.on("/api/node/firmware", HTTP_GET,
              [this]() { handleGetNodeFirmwareStatus(); });
   server_.on("/api/node/firmware", HTTP_POST,
@@ -360,6 +431,8 @@ bool WebApi::dispatchWebLayout(const spatial_light::SpatialLayout &layout) {
 }
 
 void WebApi::handleRoot() {
+  server_.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+  server_.sendHeader("Pragma", "no-cache");
   if (isProvisioningNetworkState(network_.status().state)) {
     server_.send(200, "text/html; charset=utf-8", buildProvisioningPage());
     return;
@@ -581,7 +654,9 @@ bool WebApi::parseLightingRequest(PersistedLightingState &next,
   }
   for (uint8_t index = 0; index < server_.args(); ++index) {
     const String name = server_.argName(index);
-    if ((allowNodeId && name == "id") || supportedLightingArgument(name)) {
+    if ((allowNodeId && name == "id") || name == "sceneId" ||
+        name == "name" || name == "targets" ||
+        supportedLightingArgument(name)) {
       continue;
     }
     error = F("unsupported lighting parameter");
@@ -831,6 +906,227 @@ void WebApi::handleSetNodeLighting() {
   server_.send(202, "application/json; charset=utf-8", json);
 }
 
+void WebApi::handleGetScenes() {
+  String json;
+  json.reserve(12000U);
+  json += F("{\"ok\":true,\"scenes\":[");
+  for (size_t index = 0U; index < scenes_.sceneCount(); ++index) {
+    const NamedLightingScene *scene = scenes_.sceneAt(index);
+    if (scene == nullptr) continue;
+    if (index != 0U) json += ',';
+    json += F("{\"id\":");
+    json += scene->id;
+    json += F(",\"name\":\"");
+    json += escapeJson(String(scene->name));
+    json += F("\",\"assignments\":[");
+    for (size_t assignmentIndex = 0U;
+         assignmentIndex < scene->assignmentCount; ++assignmentIndex) {
+      if (assignmentIndex != 0U) json += ',';
+      const SceneAssignment &assignment = scene->assignments[assignmentIndex];
+      json += F("{\"target\":\"");
+      json += lightingTargetId(assignment.targetId);
+      json += F("\",\"lighting\":");
+      appendLightingSceneJson(json, assignment.scene);
+      json += '}';
+    }
+    json += F("]}");
+  }
+  json += F("],\"desired\":[");
+  for (size_t index = 0U; index < scenes_.desiredCount(); ++index) {
+    const DesiredLightingState *desired = scenes_.desiredAt(index);
+    if (desired == nullptr) continue;
+    if (index != 0U) json += ',';
+    json += F("{\"target\":\"");
+    json += lightingTargetId(desired->targetId);
+    json += F("\",\"sourceSceneId\":");
+    json += desired->sourceSceneId;
+    json += F(",\"revision\":");
+    json += desired->revision;
+    json += F(",\"deliveredRevision\":");
+    json += desired->deliveredRevision;
+    json += F(",\"pending\":");
+    json += desired->pending() ? F("true") : F("false");
+    json += F(",\"lighting\":");
+    appendLightingSceneJson(json, desired->scene);
+    json += '}';
+  }
+  json += F("]}");
+  server_.send(200, "application/json; charset=utf-8", json);
+}
+
+void WebApi::handleSaveScene() {
+  if (!server_.hasArg("name") || !server_.hasArg("targets")) {
+    sendApiResult(false, "name and targets are required");
+    return;
+  }
+  String name = server_.arg("name");
+  name.trim();
+  if (name.length() == 0U || name.length() >= NamedLightingScene::kNameBytes) {
+    sendApiResult(false, "scene name must use 1 to 48 UTF-8 bytes");
+    return;
+  }
+
+  PersistedLightingState next{};
+  EffectMode requestedMode{};
+  String error;
+  if (!parseLightingRequest(next, requestedMode, false, error)) {
+    sendApiResult(false, error.c_str());
+    return;
+  }
+
+  LightingSceneId sceneId{0U};
+  if (server_.hasArg("sceneId") &&
+      !parseSceneId(server_.arg("sceneId"), sceneId, true)) {
+    sendApiResult(false, "sceneId must be a non-negative integer");
+    return;
+  }
+  if (sceneId == 0U) {
+    for (size_t index = 0U; index < scenes_.sceneCount(); ++index) {
+      const NamedLightingScene *stored = scenes_.sceneAt(index);
+      if (stored != nullptr && stored->id >= sceneId) sceneId = stored->id + 1U;
+    }
+    if (sceneId == 0U) sceneId = 1U;
+  }
+
+  NamedLightingScene definition{};
+  definition.id = sceneId;
+  if (!definition.setName(name.c_str())) {
+    sendApiResult(false, "scene name is invalid");
+    return;
+  }
+  const LightingScene lighting = makeLightingScene(next);
+  const NamedLightingScene *storedScene = scenes_.sceneById(sceneId);
+  String targets = server_.arg("targets");
+  int start = 0;
+  while (start <= targets.length()) {
+    const int separator = targets.indexOf(',', start);
+    String value = separator < 0 ? targets.substring(start)
+                                 : targets.substring(start, separator);
+    value.trim();
+    LightingTargetId targetId{0U};
+    if (!parseLightingTargetId(value, targetId) ||
+        definition.assignmentCount >= NamedLightingScene::kMaxAssignments) {
+      sendApiResult(false, "targets contains an invalid or excess node id");
+      return;
+    }
+    LightingScene targetLighting = lighting;
+    if (storedScene != nullptr) {
+      for (size_t existingIndex = 0U;
+           existingIndex < storedScene->assignmentCount; ++existingIndex) {
+        if (storedScene->assignments[existingIndex].targetId == targetId) {
+          targetLighting = storedScene->assignments[existingIndex].scene;
+          break;
+        }
+      }
+    }
+    definition.assignments[definition.assignmentCount++] = {targetId,
+                                                              targetLighting};
+    if (separator < 0) break;
+    start = separator + 1;
+  }
+  if (!scenes_.saveScene(definition)) {
+    sendApiResult(false, "scene is invalid, duplicated, or capacity is full");
+    return;
+  }
+  sceneStore_.markDirty(millis());
+  String json = F("{\"ok\":true,\"sceneId\":");
+  json += sceneId;
+  json += F("}");
+  server_.send(200, "application/json; charset=utf-8", json);
+}
+
+void WebApi::handleSetSceneAssignment() {
+  LightingSceneId sceneId{0U};
+  LightingTargetId targetId{0U};
+  if (!server_.hasArg("sceneId") || !server_.hasArg("id") ||
+      !parseSceneId(server_.arg("sceneId"), sceneId) ||
+      !parseLightingTargetId(server_.arg("id"), targetId)) {
+    sendApiResult(false, "valid sceneId and light target id are required");
+    return;
+  }
+  const NamedLightingScene *stored = scenes_.sceneById(sceneId);
+  if (stored == nullptr) {
+    sendApiResult(false, "saved scene was not found");
+    return;
+  }
+  NamedLightingScene updated = *stored;
+  SceneAssignment *assignment = nullptr;
+  for (size_t index = 0U; index < updated.assignmentCount; ++index) {
+    if (updated.assignments[index].targetId == targetId) {
+      assignment = &updated.assignments[index];
+      break;
+    }
+  }
+  if (assignment == nullptr) {
+    sendApiResult(false, "target is not a member of this scene");
+    return;
+  }
+  PersistedLightingState next{};
+  EffectMode requestedMode{};
+  String error;
+  if (!parseLightingRequest(next, requestedMode, true, error)) {
+    sendApiResult(false, error.c_str());
+    return;
+  }
+  assignment->scene = makeLightingScene(next);
+  if (!scenes_.saveScene(updated)) {
+    sendApiResult(false, "scene assignment was rejected");
+    return;
+  }
+  sceneStore_.markDirty(millis());
+  sendApiResult(true);
+}
+
+void WebApi::handleActivateScene() {
+  LightingSceneId sceneId{0U};
+  if (!server_.hasArg("sceneId") ||
+      !parseSceneId(server_.arg("sceneId"), sceneId) ||
+      !scenes_.activateScene(sceneId)) {
+    sendApiResult(false, "valid saved sceneId is required");
+    return;
+  }
+  sceneStore_.markDirty(millis());
+  server_.send(202, "application/json; charset=utf-8",
+               "{\"ok\":true,\"pending\":true}");
+}
+
+void WebApi::handleDeleteScene() {
+  LightingSceneId sceneId{0U};
+  if (!server_.hasArg("sceneId") ||
+      !parseSceneId(server_.arg("sceneId"), sceneId) ||
+      !scenes_.eraseScene(sceneId)) {
+    sendApiResult(false, "valid saved sceneId is required");
+    return;
+  }
+  sceneStore_.markDirty(millis());
+  sendApiResult(true);
+}
+
+void WebApi::handleSetTargetLighting() {
+  LightingTargetId targetId{0U};
+  if (!server_.hasArg("id") ||
+      !parseLightingTargetId(server_.arg("id"), targetId)) {
+    sendApiResult(false, "valid light target id is required");
+    return;
+  }
+  PersistedLightingState next{};
+  EffectMode requestedMode{};
+  String error;
+  if (!parseLightingRequest(next, requestedMode, true, error)) {
+    sendApiResult(false, error.c_str());
+    return;
+  }
+  if (!scenes_.applyDirect(targetId, makeLightingScene(next))) {
+    sendApiResult(false, "light target state was rejected");
+    return;
+  }
+  sceneStore_.markDirty(millis());
+  String json = F("{\"ok\":true,\"pending\":true,\"effect\":\"");
+  json += lightingEffectId(requestedMode);
+  json += F("\"}");
+  server_.send(202, "application/json; charset=utf-8", json);
+}
+
 void WebApi::handleSetNodeLedCount() {
   node::NodeId nodeId{0};
   uint16_t ledCount{0};
@@ -848,6 +1144,102 @@ void WebApi::handleSetNodeLedCount() {
   json += ledCount;
   json += '}';
   server_.send(202, "application/json; charset=utf-8", json);
+}
+
+void WebApi::handleSetNodeLayout() {
+  node::NodeId nodeId{0};
+  uint16_t activeCount{0};
+  if (!server_.hasArg("id") || !server_.hasArg("activeCount") ||
+      !parseNodeId(server_.arg("id"), nodeId) ||
+      !parseLedCount(server_.arg("activeCount"), activeCount)) {
+    sendApiResult(false, "id and activeCount are required");
+    return;
+  }
+  const String profile =
+      server_.hasArg("profile") ? server_.arg("profile") : "continuous";
+  node::LedGeometryPayload geometry{};
+  geometry.activeCount = activeCount;
+  geometry.spatialFlags =
+      server_.hasArg("reversed") &&
+              (server_.arg("reversed") == "1" ||
+               server_.arg("reversed") == "true")
+          ? node::kSpatialFlagReversed
+          : 0U;
+  if (profile == "continuous") {
+    geometry.layoutProfile = 0U;
+    const long center = server_.hasArg("centerIndex")
+                            ? server_.arg("centerIndex").toInt()
+                            : (activeCount - 1U) / 2U;
+    if (center < 0 || center >= activeCount) {
+      sendApiResult(false, "centerIndex is outside activeCount");
+      return;
+    }
+    geometry.centerIndex = static_cast<uint16_t>(center);
+    geometry.centerCount = activeCount;
+  } else if (profile == "segmented") {
+    geometry.layoutProfile = 1U;
+    if (!server_.hasArg("leftCount") || !server_.hasArg("centerCount") ||
+        !server_.hasArg("rightCount")) {
+      sendApiResult(false, "segmented layout needs left, center and right");
+      return;
+    }
+    const long left = server_.arg("leftCount").toInt();
+    const long center = server_.arg("centerCount").toInt();
+    const long right = server_.arg("rightCount").toInt();
+    if (left < 0 || center < 1 || right < 0 ||
+        !spatial_light::isValidSegmentedLayout(
+            activeCount, static_cast<uint16_t>(left),
+            static_cast<uint16_t>(center), static_cast<uint16_t>(right))) {
+      sendApiResult(false, "segmented counts must equal activeCount");
+      return;
+    }
+    geometry.leftCount = static_cast<uint16_t>(left);
+    geometry.centerCount = static_cast<uint16_t>(center);
+    geometry.rightCount = static_cast<uint16_t>(right);
+    geometry.centerIndex = spatial_light::resolveCenterIndex(
+        activeCount, geometry.leftCount, geometry.centerCount,
+        geometry.rightCount, true);
+  } else {
+    sendApiResult(false, "profile must be continuous or segmented");
+    return;
+  }
+  if (!nodes_.requestNodeGeometry(nodeId, geometry, millis())) {
+    sendApiResult(false, "selected node is unavailable, busy, or rejected the layout");
+    return;
+  }
+  server_.send(202, "application/json; charset=utf-8",
+               "{\"ok\":true,\"pending\":true}");
+}
+
+bool parseLightingTargetId(const String &value, LightingTargetId &targetId) {
+  if (value == "local-s3") {
+    targetId = kLocalLightingTargetId;
+    return true;
+  }
+  node::NodeId remote{0U};
+  if (!parseNodeId(value, remote)) return false;
+  targetId = remote;
+  return true;
+}
+
+String lightingTargetId(const LightingTargetId targetId) {
+  if (targetId == kLocalLightingTargetId) return F("local-s3");
+  char value[9];
+  snprintf(value, sizeof(value), "%08lX",
+           static_cast<unsigned long>(targetId));
+  return String(value);
+}
+
+bool parseSceneId(const String &value, LightingSceneId &sceneId,
+                  const bool allowZero) {
+  if (value.length() == 0U) return false;
+  char *end = nullptr;
+  const unsigned long parsed = strtoul(value.c_str(), &end, 10);
+  if (end == nullptr || *end != '\0' || (!allowZero && parsed == 0UL)) {
+    return false;
+  }
+  sceneId = static_cast<LightingSceneId>(parsed);
+  return true;
 }
 
 void WebApi::handleSetNodeName() {
@@ -1254,6 +1646,25 @@ void WebApi::handleGetNodes() {
     json += '"';
     json += F(",\"ledCount\":");
     json += record->status.ledCount;
+    json += F(",\"layout\":{\"profile\":\"");
+    json += record->status.layoutProfile == 1U ? "segmented" : "continuous";
+    json += F("\",\"activeCount\":");
+    json += record->status.ledCount;
+    json += F(",\"maxLedCount\":");
+    json += record->capabilities.maxLedCount;
+    json += F(",\"centerIndex\":");
+    json += record->status.centerIndex;
+    json += F(",\"leftCount\":");
+    json += record->status.leftCount;
+    json += F(",\"centerCount\":");
+    json += record->status.centerCount;
+    json += F(",\"rightCount\":");
+    json += record->status.rightCount;
+    json += F(",\"reversed\":");
+    json += (record->status.spatialFlags & node::kSpatialFlagReversed) != 0U
+                ? F("true")
+                : F("false");
+    json += '}';
     json += F(",\"bound\":");
     json += record->capabilities.bound ? F("true") : F("false");
     json += F(",\"controlMode\":");

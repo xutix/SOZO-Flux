@@ -43,7 +43,9 @@ class C3NodeApplication {
   uint32_t lastAppliedSceneRevision() const;
 
  private:
-  PersistedLightingState makeLocalState(uint16_t ledCount) const;
+  PersistedLightingState makeLocalState(const NodeLedCountState &layout) const;
+  spatial_light::SpatialLayout makeSpatialLayout(
+      const NodeLedCountState &layout) const;
   node::CapabilitiesPayload makeCapabilities() const;
   void handleInbound(const node::Envelope &envelope, uint32_t nowMs);
   void handleBindRequest(const node::Envelope &envelope, uint32_t nowMs);

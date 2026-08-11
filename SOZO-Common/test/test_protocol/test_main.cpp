@@ -32,7 +32,7 @@ Envelope makeEnvelope() {
 }
 
 void test_protocol_constants_fit_ble_packet_budget() {
-  CHECK_EQ(1, sozo::node::kProtocolVersion);
+  CHECK_EQ(2, sozo::node::kProtocolVersion);
   CHECK_TRUE(sozo::node::kMaxPacketBytes <= 192);
   CHECK_TRUE(sozo::node::kMaxPayloadBytes >= 128);
 }

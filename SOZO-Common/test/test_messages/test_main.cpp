@@ -258,6 +258,12 @@ void test_status_snapshot_round_trip_is_separate_from_receipt() {
   input.controlMode = NodeControlMode::OfflineHold;
   input.pairingWindowOpen = true;
   input.ledCount = 60U;
+  input.layoutProfile = 1U;
+  input.centerIndex = 29U;
+  input.leftCount = 20U;
+  input.centerCount = 20U;
+  input.rightCount = 20U;
+  input.spatialFlags = sozo::node::kSpatialFlagReversed;
   Envelope envelope{};
   CHECK_EQ(CodecResult::Ok, sozo::node::writeStatusSnapshot(envelope, input));
   CHECK_EQ(MessageType::StatusSnapshot, envelope.messageType);
@@ -270,6 +276,36 @@ void test_status_snapshot_round_trip_is_separate_from_receipt() {
   CHECK_EQ(NodeControlMode::OfflineHold, output.controlMode);
   CHECK_TRUE(output.pairingWindowOpen);
   CHECK_EQ(60U, output.ledCount);
+  CHECK_EQ(1U, output.layoutProfile);
+  CHECK_EQ(29U, output.centerIndex);
+  CHECK_EQ(20U, output.leftCount);
+  CHECK_EQ(20U, output.centerCount);
+  CHECK_EQ(20U, output.rightCount);
+  CHECK_EQ(sozo::node::kSpatialFlagReversed, output.spatialFlags);
+}
+
+void test_led_geometry_request_round_trips_and_validates_profiles() {
+  sozo::node::LedGeometryPayload input{};
+  input.layoutProfile = 1U;
+  input.activeCount = 60U;
+  input.centerIndex = 29U;
+  input.leftCount = 20U;
+  input.centerCount = 20U;
+  input.rightCount = 20U;
+  input.spatialFlags = sozo::node::kSpatialFlagReversed;
+  const auto output = roundTrip(MessageType::LedGeometryRequest, input,
+                                sozo::node::writeLedGeometryRequest,
+                                sozo::node::readLedGeometryRequest);
+  CHECK_EQ(60U, output.activeCount);
+  CHECK_EQ(20U, output.leftCount);
+  CHECK_EQ(20U, output.centerCount);
+  CHECK_EQ(20U, output.rightCount);
+  CHECK_EQ(sozo::node::kSpatialFlagReversed, output.spatialFlags);
+
+  input.centerCount = 19U;
+  Envelope invalid{};
+  CHECK_EQ(CodecResult::InvalidPayload,
+           sozo::node::writeLedGeometryRequest(invalid, input));
 }
 
 void test_led_count_request_round_trips_and_rejects_zero() {
@@ -406,6 +442,7 @@ int main(int, char **) {
   test_rejected_command_receipt_preserves_error_code();
   test_status_snapshot_round_trip_is_separate_from_receipt();
   test_led_count_request_round_trips_and_rejects_zero();
+  test_led_geometry_request_round_trips_and_validates_profiles();
   test_status_request_has_no_payload_and_is_validated();
   test_control_mode_request_round_trips_and_rejects_invalid_mode();
   test_firmware_update_messages_preserve_hash_offset_and_progress();

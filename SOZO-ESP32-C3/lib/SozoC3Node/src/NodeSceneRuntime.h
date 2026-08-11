@@ -20,6 +20,7 @@ class NodeSceneRuntime {
                               uint32_t localNowMs,
                               SceneTarget target = SceneTarget::FollowSpace);
   bool setLocalLedCount(uint16_t ledCount);
+  bool setLocalLayout(const spatial_light::SpatialLayout &layout);
   bool setControlMode(node::NodeControlMode mode);
   node::NodeControlMode controlMode() const;
   NodeControlState controlState() const;

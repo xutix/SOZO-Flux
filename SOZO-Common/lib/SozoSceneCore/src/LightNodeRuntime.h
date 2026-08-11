@@ -52,6 +52,7 @@ class LightNodeRuntime {
                                    LightSceneTarget target =
                                        LightSceneTarget::FollowSpace);
   bool setLocalLedCount(uint16_t ledCount);
+  bool setLocalLayout(const spatial_light::SpatialLayout &layout);
   void updateLocalConfiguration(
       const LocalLightConfiguration &configuration,
       const AudioTuning &audio);

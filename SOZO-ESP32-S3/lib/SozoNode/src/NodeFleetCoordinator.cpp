@@ -140,12 +140,28 @@ bool NodeFleetCoordinator::requestIndependentScene(
          session->requestIndependentScene(nodeId, state, nowMs);
 }
 
+bool NodeFleetCoordinator::requestDesiredScene(
+    const node::NodeId nodeId, const LightingScene &scene,
+    const uint32_t revision, const uint32_t nowMs) {
+  NodeCoordinator *session = sessionFor(nodeId);
+  return session != nullptr &&
+         session->requestDesiredScene(nodeId, scene, revision, nowMs);
+}
+
 bool NodeFleetCoordinator::requestNodeLedCount(const node::NodeId nodeId,
                                                const uint16_t ledCount,
                                                const uint32_t nowMs) {
   NodeCoordinator *session = sessionFor(nodeId);
   return session != nullptr &&
          session->requestNodeLedCount(nodeId, ledCount, nowMs);
+}
+
+bool NodeFleetCoordinator::requestNodeGeometry(
+    const node::NodeId nodeId, const node::LedGeometryPayload &geometry,
+    const uint32_t nowMs) {
+  NodeCoordinator *session = sessionFor(nodeId);
+  return session != nullptr &&
+         session->requestNodeGeometry(nodeId, geometry, nowMs);
 }
 
 bool NodeFleetCoordinator::requestNodeFirmwareUpdate(
