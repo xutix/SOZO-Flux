@@ -172,7 +172,7 @@ function remoteLayout(activeCount, profile = 'continuous') {
 }
 
 function loadPageUi(serverStatus, nodeResponse = { ok: true, nodes: [] },
-  nodeNameFailure = '') {
+  nodeNameFailure = '', sceneResponse = { ok: true, scenes: [], desired: [] }) {
   const source = readFileSync(new URL('../src/SpatialLightPage.cpp', import.meta.url), 'utf8');
   const match = source.match(/<script>\s*([\s\S]*?)\s*<\/script>/);
   assert.ok(match, 'embedded page script must be present');
@@ -180,7 +180,7 @@ function loadPageUi(serverStatus, nodeResponse = { ok: true, nodes: [] },
   const fetchCalls = [];
   const script = match[1].replace(
     'loadStatus();setInterval(()=>loadStatus(false),5000);',
-    'globalThis.__ui={setLayoutProfile,saveLayout,selectControlTarget,loadStatus,loadNodes,openNodePairing,activateView,saveNodeName,getLayoutProfile:()=>layoutProfile,getActiveView:()=>activeView,setState:value=>state=value,setSelected:value=>selected=value,getState:()=>state,getFetchCalls:()=>fetchCalls,getSelectedNodeId:()=>selectedNodeId,getSelectedRemoteNode:selectedRemoteNode,getScopeValue:()=>document.getElementById(\'scopeValue\').textContent,getDraftValue:(nodeId,field=\'name\')=>formDrafts.read(nodeFieldKey(nodeId,field),undefined),renderEffects,chooseEffect,renderParameters,renderLightNodes,renderLightNodeControl,renderSpaceStatus,colorControl,extensionColorControl,getParameterClass:typeof parameterLayoutClass===\'function\'?parameterLayoutClass:null,getParameterPlan:typeof parameterPlan===\'function\'?parameterPlan:null,getParameterGridClass:typeof parameterGridClass===\'function\'?parameterGridClass:null,getParameterColumns:typeof parameterColumns===\'function\'?parameterColumns:null,getParameterGridItems:typeof parameterGridItems===\'function\'?parameterGridItems:null};',
+    'globalThis.__ui={setLayoutProfile,saveLayout,selectControlTarget,loadStatus,loadNodes,loadScenes,openNodePairing,activateView,saveNodeName,getLayoutProfile:()=>layoutProfile,getActiveView:()=>activeView,setState:value=>state=value,setNodeState:value=>nodeState=value,setSelected:value=>selected=value,setSceneState:value=>sceneState=value,setSelectedControlTarget:value=>selectedControlTarget=value,setSelectedSceneTarget:value=>selectedSceneTarget=value,getSelectedSceneTarget:()=>selectedSceneTarget,lightingForControlTarget,getState:()=>state,getFetchCalls:()=>fetchCalls,getSelectedNodeId:()=>selectedNodeId,getSelectedRemoteNode:selectedRemoteNode,getScopeValue:()=>document.getElementById(\'scopeValue\').textContent,getDraftValue:(nodeId,field=\'name\')=>formDrafts.read(nodeFieldKey(nodeId,field),undefined),renderEffects,chooseEffect,renderParameters,renderLightNodes,renderLightNodeControl,renderSpaceStatus,colorControl,extensionColorControl,getParameterClass:typeof parameterLayoutClass===\'function\'?parameterLayoutClass:null,getParameterPlan:typeof parameterPlan===\'function\'?parameterPlan:null,getParameterGridClass:typeof parameterGridClass===\'function\'?parameterGridClass:null,getParameterColumns:typeof parameterColumns===\'function\'?parameterColumns:null,getParameterGridItems:typeof parameterGridItems===\'function\'?parameterGridItems:null};',
   );
   const sandbox = {
     URLSearchParams,
@@ -205,9 +205,7 @@ function loadPageUi(serverStatus, nodeResponse = { ok: true, nodes: [] },
           if (requestUrl === '/api/node/firmware') {
             return { ok: true, state: 'idle', nodeId: '00000000', progress: 0, error: 'none' };
           }
-          if (requestUrl === '/api/scenes') {
-            return { ok: true, scenes: [], desired: [] };
-          }
+          if (requestUrl === '/api/scenes') return structuredClone(sceneResponse);
           if (requestUrl === '/api/target/lighting' ||
               requestUrl.startsWith('/api/scene')) {
             return { ok: true };
@@ -373,6 +371,66 @@ test('independent C3 preset click keeps pure blue and changes only the scene dra
 
   assert.equal(draft.settings.color, '#0000FF');
   assert.equal(ui.getFetchCalls().some(call => call.url === '/api/node/lighting'), false);
+});
+
+test('keeps a newly checked scene output selected before membership is saved', () => {
+  const { ui } = loadPageUi(statusWith('continuous'));
+  const remoteLighting = {
+    effect: 'SOLID',
+    settings: { ...statusWith('continuous').settings, color: '#0000FF' },
+  };
+  ui.setSceneState({
+    scenes: [{
+      id: 7,
+      name: '音乐空间',
+      assignments: [{
+        target: 'local-s3',
+        lighting: { effect: 'MUSIC', settings: statusWith('continuous').settings },
+      }],
+    }],
+    desired: [{ target: '51930b93', lighting: remoteLighting }],
+  });
+  ui.setSelectedControlTarget('scene:7');
+  ui.setSelectedSceneTarget('51930b93');
+
+  const lighting = ui.lightingForControlTarget();
+
+  assert.equal(ui.getSelectedSceneTarget(), '51930b93');
+  assert.equal(lighting.effect, 'SOLID');
+  assert.equal(lighting.settings.color, '#0000FF');
+});
+
+test('scene polling does not reset a newly checked output to the first member', async () => {
+  const sceneResponse = {
+    ok: true,
+    scenes: [{
+      id: 7,
+      name: '音乐空间',
+      assignments: [{
+        target: 'local-s3',
+        lighting: { effect: 'MUSIC', settings: statusWith('continuous').settings },
+      }],
+    }],
+    desired: [],
+  };
+  const nodes = {
+    ok: true,
+    nodes: [{
+      id: '51930b93', name: '桌下灯带', state: 'ready', capabilities: 17,
+      lightCapable: true, bound: true, ledCount: 71,
+      layout: remoteLayout(71),
+    }],
+  };
+  const { ui } = loadPageUi(statusWith('continuous'), nodes, '', sceneResponse);
+  ui.setState(statusWith('continuous'));
+  ui.setNodeState(nodes);
+  ui.setSceneState(sceneResponse);
+  ui.setSelectedControlTarget('scene:7');
+  ui.setSelectedSceneTarget('51930b93');
+
+  await ui.loadScenes(false);
+
+  assert.equal(ui.getSelectedSceneTarget(), '51930b93');
 });
 
 test('maps lighting controls to bento layout roles', () => {
