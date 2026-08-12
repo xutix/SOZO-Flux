@@ -19,7 +19,7 @@ $coreModules = @(
 )
 $forbiddenTokens = @(
   "Arduino.h",
-  "Adafruit_NeoPixel",
+  "concrete LED driver",
   "FastLED",
   "NimBLE",
   "WiFi",

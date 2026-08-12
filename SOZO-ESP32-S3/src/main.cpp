@@ -1,6 +1,6 @@
 #include <Arduino.h>
 #include <ArduinoOTA.h>
-#include <Adafruit_NeoPixel.h>
+#include <FastLED.h>
 #include <SpatialLightCore.h>
 
 #include <AudioAnalyzer.h>
@@ -38,7 +38,6 @@ constexpr char kOtaPassword[] = SOZO_OTA_PASSWORD;
 constexpr uint8_t kLedPin = 18;
 constexpr uint8_t kStatusLedPin = 48;
 constexpr uint8_t kStatusLedCount = 1;
-constexpr uint8_t kStatusLedBrightness = 60;
 constexpr uint32_t kSerialReportIntervalMs = 500;
 
 sozo::SettingsStore settingsStore;
@@ -92,8 +91,7 @@ sozo::SceneDeliveryCoordinator sceneDelivery(lightingControl,
                                               localLightingTarget,
                                               nodeCoordinator);
 sozo::SerialConsole serialConsole(Serial, lightingControl);
-Adafruit_NeoPixel statusLed(kStatusLedCount, kStatusLedPin,
-                            NEO_GRB + NEO_KHZ800);
+CRGB statusLed[kStatusLedCount];
 
 void restartDevice();
 sozo::WebApi webApi(lightingControl, networkManager, audioAnalyzer,
@@ -180,10 +178,9 @@ void handleOta() {
 }
 
 void initStatusLed() {
-  statusLed.begin();
-  statusLed.setBrightness(kStatusLedBrightness);
-  statusLed.clear();
-  statusLed.show();
+  FastLED.addLeds<WS2812, kStatusLedPin, GRB>(statusLed, kStatusLedCount);
+  statusLed[0] = CRGB::Black;
+  FastLED.show();
 }
 
 void initLocalLightNode() {

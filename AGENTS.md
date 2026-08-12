@@ -11,6 +11,10 @@
   `SOZO-ESP32-C3/`；共享代码只能使用本仓库的 `SOZO-Common/`。
 - 不得从仓库外的同名、旧版或实验目录构建或烧录设备。尤其不得使用相邻的
   `SOZO-ESP32-n8r8` 或其他独立 `SOZO-ESP32-C3` 目录替代本仓库工程。
+- SOZO Flux 只允许存在本仓库这一份可编辑源代码。不要创建相邻的 SOZO、
+  `SOZO-Common`、`SOZO-ESP32-C3` 或 S3 工程副本；实验也必须在本仓库内完成。
+- S3 和 C3 的 WS2812 输出统一使用 FastLED。不得新增其他灯带驱动依赖；依赖
+  变更必须同时通过 `tools/verify-module-dependencies.ps1`。
 - 未经用户明确要求更改产品身份，不得修改以下值：
   - 产品名 `SOZO Flux`
   - S3 项目名 `SOZO Flux Gateway S3`

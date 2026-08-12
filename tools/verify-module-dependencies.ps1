@@ -13,7 +13,7 @@ function Assert-NoMatch {
   }
 }
 
-Assert-NoMatch "$repoRoot\SOZO-Common\lib" '#include\s*[<"](Arduino|Preferences|NimBLE|Adafruit_NeoPixel)' 'Common must remain platform independent.'
+Assert-NoMatch "$repoRoot\SOZO-Common\lib" '#include\s*[<"](Arduino|Preferences|NimBLE)' 'Common must remain platform independent.'
 Assert-NoMatch "$repoRoot\SOZO-Common\lib\SozoSceneCore" '#include\s*[<"]SozoNode(Protocol|Messages)' 'SceneCore is a domain module and must not depend on the wire protocol.'
 Assert-NoMatch "$repoRoot\SOZO-ESP32-S3\lib\SozoControl" '#include\s*[<"](Arduino|Preferences|SettingsStore|LightingSceneStore)' 'Application control may depend only on persistence ports.'
 Assert-NoMatch "$repoRoot\SOZO-ESP32-S3\lib\SozoNetwork" '#include\s*[<"]SettingsStore' 'Network must depend on its credential repository port, not the NVS adapter.'
@@ -23,6 +23,21 @@ Assert-NoMatch "$repoRoot\SOZO-ESP32-S3\src" 'SOZO-ESP32-C3' 'S3 may not depend 
 Assert-NoMatch "$repoRoot\SOZO-ESP32-S3\lib" 'SOZO-ESP32-C3' 'S3 may not depend on the C3 firmware project.'
 Assert-NoMatch "$repoRoot\SOZO-ESP32-C3\src" 'SOZO-ESP32-S3' 'C3 may not depend on the S3 firmware project.'
 Assert-NoMatch "$repoRoot\SOZO-ESP32-C3\lib" 'SOZO-ESP32-S3' 'C3 may not depend on the S3 firmware project.'
+
+$forbiddenDriver = 'Adafruit' + '_NeoPixel'
+$forbiddenPackage = 'Adafruit' + ' NeoPixel'
+$driverMatches = Get-ChildItem -LiteralPath $repoRoot -Recurse -File |
+  Where-Object {
+    $_.FullName -notmatch '[\\/]\.git[\\/]' -and
+    $_.FullName -notmatch '[\\/]\.pio[\\/]' -and
+    $_.FullName -notmatch '[\\/]\.vscode[\\/]' -and
+    $_.FullName -notmatch '[\\/]docs[\\/]superpowers[\\/]'
+  } |
+  Select-String -SimpleMatch -Pattern $forbiddenDriver, $forbiddenPackage
+foreach ($match in $driverMatches) {
+  $relative = $match.Path.Substring($repoRoot.Length).TrimStart('\')
+  $violations.Add("$relative`:$($match.LineNumber): SOZO uses FastLED only; the legacy LED driver is forbidden.")
+}
 
 if ($violations.Count -gt 0) {
   $violations | ForEach-Object { Write-Error $_ }

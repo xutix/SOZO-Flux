@@ -235,7 +235,7 @@ directly. The S3 strip is an optional local light node and consumes the same
 | Control vocabulary, sources, validation and persisted state | `lib/SozoDomain` |
 | Authoritative space scene and shared light-node runtime | `../SOZO-Common/lib/SozoSceneCore` |
 | Shared LED effects and spatial rendering | `../SOZO-Common/lib/SozoLightingCore` |
-| Optional S3 local-node NeoPixel output | `lib/SozoLightingAdapter` |
+| Optional S3 local-node FastLED output | `lib/SozoLightingAdapter` |
 | Microphone sampling and audio frame analysis | `lib/SozoAudio` |
 | Lighting use cases, validation and persistence ports | `lib/SozoControl` |
 | Router Wi-Fi, mDNS and provisioning AP | `lib/SozoNetwork` |
