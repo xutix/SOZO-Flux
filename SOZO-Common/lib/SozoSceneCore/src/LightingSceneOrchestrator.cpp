@@ -33,7 +33,7 @@ bool LightingSceneOrchestrator::eraseScene(const LightingSceneId sceneId) {
     for (size_t move = index + 1U; move < sceneCount_; ++move) {
       scenes_[move - 1U] = scenes_[move];
     }
-    scenes_[--sceneCount_] = {};
+    scenes_[--sceneCount_] = NamedLightingScene{};
     return true;
   }
   return false;
