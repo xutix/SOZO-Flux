@@ -180,7 +180,7 @@ function loadPageUi(serverStatus, nodeResponse = { ok: true, nodes: [] },
   const fetchCalls = [];
   const script = match[1].replace(
     'loadStatus();setInterval(()=>loadStatus(false),5000);',
-    'globalThis.__ui={setLayoutProfile,saveLayout,selectControlTarget,loadStatus,loadNodes,loadScenes,openNodePairing,activateView,saveNodeName,getLayoutProfile:()=>layoutProfile,getActiveView:()=>activeView,setState:value=>state=value,setNodeState:value=>nodeState=value,setSelected:value=>selected=value,setSceneState:value=>sceneState=value,setSelectedControlTarget:value=>selectedControlTarget=value,setSelectedSceneTarget:value=>selectedSceneTarget=value,getSelectedSceneTarget:()=>selectedSceneTarget,lightingForControlTarget,getState:()=>state,getFetchCalls:()=>fetchCalls,getSelectedNodeId:()=>selectedNodeId,getSelectedRemoteNode:selectedRemoteNode,getScopeValue:()=>document.getElementById(\'scopeValue\').textContent,getDraftValue:(nodeId,field=\'name\')=>formDrafts.read(nodeFieldKey(nodeId,field),undefined),renderEffects,chooseEffect,renderParameters,renderLightNodes,renderLightNodeControl,renderSpaceStatus,colorControl,extensionColorControl,getParameterClass:typeof parameterLayoutClass===\'function\'?parameterLayoutClass:null,getParameterPlan:typeof parameterPlan===\'function\'?parameterPlan:null,getParameterGridClass:typeof parameterGridClass===\'function\'?parameterGridClass:null,getParameterColumns:typeof parameterColumns===\'function\'?parameterColumns:null,getParameterGridItems:typeof parameterGridItems===\'function\'?parameterGridItems:null};',
+    'globalThis.__ui={setLayoutProfile,saveLayout,selectControlTarget,loadStatus,loadNodes,loadScenes,openNodePairing,activateView,saveNodeName,getLayoutProfile:()=>layoutProfile,getActiveView:()=>activeView,setState:value=>state=value,setNodeState:value=>nodeState=value,setSelected:value=>selected=value,setSceneState:value=>sceneState=value,setSelectedControlTarget:value=>selectedControlTarget=value,setSelectedSceneTarget:value=>selectedSceneTarget=value,getSelectedSceneTarget:()=>selectedSceneTarget,setSceneMemberSelected,sceneMemberIds,lightingForControlTarget,getState:()=>state,getFetchCalls:()=>fetchCalls,getSelectedNodeId:()=>selectedNodeId,getSelectedRemoteNode:selectedRemoteNode,getScopeValue:()=>document.getElementById(\'scopeValue\').textContent,getDraftValue:(nodeId,field=\'name\')=>formDrafts.read(nodeFieldKey(nodeId,field),undefined),renderEffects,chooseEffect,renderParameters,renderLightNodes,renderLightNodeControl,renderSpaceStatus,colorControl,extensionColorControl,getParameterClass:typeof parameterLayoutClass===\'function\'?parameterLayoutClass:null,getParameterPlan:typeof parameterPlan===\'function\'?parameterPlan:null,getParameterGridClass:typeof parameterGridClass===\'function\'?parameterGridClass:null,getParameterColumns:typeof parameterColumns===\'function\'?parameterColumns:null,getParameterGridItems:typeof parameterGridItems===\'function\'?parameterGridItems:null};',
   );
   const sandbox = {
     URLSearchParams,
@@ -398,6 +398,25 @@ test('keeps a newly checked scene output selected before membership is saved', (
   assert.equal(ui.getSelectedSceneTarget(), '51930b93');
   assert.equal(lighting.effect, 'SOLID');
   assert.equal(lighting.settings.color, '#0000FF');
+});
+
+test('keeps the membership checkmark when edit redraws an unsaved scene output', () => {
+  const { ui } = loadPageUi(statusWith('continuous'));
+  const scene = {
+    id: 7,
+    name: '音乐空间',
+    assignments: [{
+      target: 'local-s3',
+      lighting: { effect: 'RAINBOW', settings: statusWith('continuous').settings },
+    }],
+  };
+  ui.setSceneState({ scenes: [scene], desired: [] });
+  ui.setSelectedControlTarget('scene:7');
+
+  ui.setSceneMemberSelected(scene, '51930b93', true);
+  ui.setSelectedSceneTarget('51930b93');
+
+  assert.deepEqual(ui.sceneMemberIds(scene), ['local-s3', '51930b93']);
 });
 
 test('scene polling does not reset a newly checked output to the first member', async () => {
