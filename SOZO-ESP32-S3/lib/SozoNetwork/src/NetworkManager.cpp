@@ -29,8 +29,8 @@ const char *networkStateName(const NetworkState state) {
   }
 }
 
-NetworkManager::NetworkManager(SettingsStore &settings)
-    : settings_(settings),
+NetworkManager::NetworkManager(NetworkCredentialRepository &credentials)
+    : credentials_(credentials),
       savedSsid_(),
       savedPassword_(),
       status_{NetworkState::Failed, false, String(), String(), String(), 0, 0} {}
@@ -38,7 +38,7 @@ NetworkManager::NetworkManager(SettingsStore &settings)
 bool NetworkManager::begin() {
   savedSsid_ = String();
   savedPassword_ = String();
-  settings_.loadWiFiCredentials(savedSsid_, savedPassword_);
+  credentials_.load(savedSsid_, savedPassword_);
   if (savedSsid_.isEmpty()) {
     return startProvisioningAccessPoint();
   }
@@ -96,7 +96,7 @@ std::vector<ScannedNetwork> NetworkManager::scan() {
 bool NetworkManager::saveCredentials(const String &ssid, const String &password) {
   String normalizedSsid = ssid;
   normalizedSsid.trim();
-  if (!settings_.saveWiFiCredentials(normalizedSsid, password)) {
+  if (!credentials_.save(normalizedSsid, password)) {
     return false;
   }
   savedSsid_ = normalizedSsid;
@@ -105,7 +105,7 @@ bool NetworkManager::saveCredentials(const String &ssid, const String &password)
 }
 
 bool NetworkManager::resetCredentials() {
-  if (!settings_.clearWiFiCredentials()) {
+  if (!credentials_.clear()) {
     return false;
   }
   savedSsid_ = String();

@@ -11,37 +11,48 @@ constexpr uint32_t kAudioIntervalMs = 33U;
 }  // namespace
 
 NodeCoordinator::NodeCoordinator(NodeTransport &transport)
-    : transport_(transport) {}
+    : transport_(transport), registry_(ownedRegistry_),
+      firmwareTransfer_(transport, 3000U, 3U) {}
+
+NodeCoordinator::NodeCoordinator(NodeTransport &transport,
+                                 NodeRegistry &registry)
+    : transport_(transport), registry_(registry),
+      firmwareTransfer_(transport, 3000U, 3U) {}
 
 bool NodeCoordinator::begin() { return transport_.begin(); }
 
 void NodeCoordinator::tick(const uint32_t nowMs,
-                           const PersistedLightingState &lightingState,
-                           const LightingSnapshot &lightingRuntime,
                            const AudioFrame &audioFrame) {
-  observeScene(lightingState, lightingRuntime);
   lastTickMs_ = nowMs;
   transport_.tick(nowMs);
   observeTransportLifecycle(nowMs);
   handleInbound(nowMs);
   bus_.expireRequests(nowMs);
 
+  firmwareTransfer_.tick(nowMs);
+  if (firmwareTransfer_.active() ||
+      (firmwareTransfer_.status().state ==
+           NodeFirmwareTransferState::Succeeded &&
+       transport_.readyGeneration() == firmwareReadyGeneration_)) {
+    return;
+  }
+
   if (!transport_.ready()) return;
   handleReadyGeneration(nowMs);
   if (!bindingReady_) {
+    if (!transport_.capabilities().bound && !bindingAllowed_) return;
+    if (activeNodeId_ != 0U && registry_.find(activeNodeId_) == nullptr) {
+      registry_.registerCapabilities(activeNodeId_, transport_.capabilities(),
+                                     nowMs);
+    }
     if (!bindingRequested_) requestBinding(nowMs);
     return;
   }
 
-  if (sceneSentGeneration_ != transport_.readyGeneration() ||
-      acknowledgedSceneRevision_ != sceneRevision_) {
-    sendScene(nowMs);
-  }
-  if (acknowledgedSceneRevision_ == sceneRevision_ &&
-      statusRequestedGeneration_ != transport_.readyGeneration()) {
+  if (statusRequestedGeneration_ != transport_.readyGeneration()) {
     requestStatus(nowMs);
   }
-  sendAudio(nowMs, lightingState.mode, audioFrame);
+  sendAudio(nowMs, desiredEffectMode_, audioFrame);
 }
 
 const NodeRegistry &NodeCoordinator::registry() const { return registry_; }
@@ -50,6 +61,10 @@ NodeTransportState NodeCoordinator::transportState() const {
 }
 bool NodeCoordinator::nodeReady() const {
   return transport_.ready() && bindingReady_;
+}
+node::NodeId NodeCoordinator::activeNodeId() const { return activeNodeId_; }
+void NodeCoordinator::setBindingAllowed(const bool allowed) {
+  bindingAllowed_ = allowed;
 }
 const char *NodeCoordinator::operationName() const {
   return transport_.operationName();
@@ -91,20 +106,16 @@ bool NodeCoordinator::requestNodeControlMode(const node::NodeId nodeId,
   return true;
 }
 
-bool NodeCoordinator::requestIndependentScene(
-    const node::NodeId nodeId, const PersistedLightingState &state,
-    const uint32_t nowMs) {
+bool NodeCoordinator::requestDesiredScene(
+    const node::NodeId nodeId, const LightingScene &desiredScene,
+    const uint32_t revision, const uint32_t nowMs) {
   const NodeRecord *record = registry_.find(nodeId);
   if (!isAvailableLightNode(nodeId) || record == nullptr ||
       record->status.controlMode != node::NodeControlMode::Independent ||
-      pendingIndependentSceneCorrelation_ != 0) {
+      pendingIndependentSceneCorrelation_ != 0 || revision == 0U) {
     return false;
   }
-  const LightingSnapshot runtime{state.mode, state.layout.activeCount, false,
-                                 -1};
-  node::SceneSnapshotPayload scene = makeSceneSnapshot(state, runtime);
-  ++independentSceneRevision_;
-  if (independentSceneRevision_ == 0U) ++independentSceneRevision_;
+  const node::SceneSnapshotPayload scene = makeSceneSnapshot(desiredScene);
   node::Envelope envelope{};
   envelope.messageType = node::MessageType::SceneSnapshot;
   envelope.channelId =
@@ -114,7 +125,7 @@ bool NodeCoordinator::requestIndependentScene(
   envelope.targetNodeId = nodeId;
   envelope.sequence = outboundSequence_++;
   envelope.timestampMs = nowMs;
-  envelope.sceneRevision = independentSceneRevision_;
+  envelope.sceneRevision = revision;
   envelope.correlationId = correlationSequence_++;
   if (node::writeSceneSnapshot(envelope, scene) != node::CodecResult::Ok ||
       bus_.awaitResponse(envelope.correlationId,
@@ -128,6 +139,7 @@ bool NodeCoordinator::requestIndependentScene(
     return false;
   }
   pendingIndependentSceneCorrelation_ = envelope.correlationId;
+  desiredEffectMode_ = desiredScene.mode;
   return true;
 }
 
@@ -165,6 +177,58 @@ bool NodeCoordinator::requestNodeLedCount(const node::NodeId nodeId,
   return true;
 }
 
+bool NodeCoordinator::requestNodeGeometry(
+    const node::NodeId nodeId, const node::LedGeometryPayload &geometry,
+    const uint32_t nowMs) {
+  const NodeRecord *record = registry_.find(nodeId);
+  if (!isAvailableLightNode(nodeId) || record == nullptr ||
+      geometry.activeCount > record->capabilities.maxLedCount ||
+      pendingLedCountCorrelation_ != 0U) {
+    return false;
+  }
+  node::Envelope envelope{};
+  envelope.channelId = static_cast<uint16_t>(node::ServiceId::SetLedGeometry);
+  envelope.flags = node::kFlagRequiresAck;
+  envelope.sourceNodeId = node::kCoordinatorNodeId;
+  envelope.targetNodeId = nodeId;
+  envelope.sequence = outboundSequence_++;
+  envelope.timestampMs = nowMs;
+  envelope.correlationId = correlationSequence_++;
+  if (node::writeLedGeometryRequest(envelope, geometry) !=
+          node::CodecResult::Ok ||
+      bus_.awaitResponse(envelope.correlationId,
+                         nowMs + kSceneReceiptTimeoutMs, onLedCountReceipt,
+                         this) != node::BusResult::Ok) {
+    return false;
+  }
+  if (!transport_.send(envelope)) {
+    bus_.cancelResponse(envelope.correlationId);
+    return false;
+  }
+  pendingLedCountCorrelation_ = envelope.correlationId;
+  return true;
+}
+
+bool NodeCoordinator::requestNodeFirmwareUpdate(
+    const node::NodeId nodeId, const uint8_t *image, const size_t imageSize,
+    const uint8_t sha256[32], const uint32_t nowMs) {
+  const NodeRecord *record = registry_.find(nodeId);
+  if (!isAvailableLightNode(nodeId) || record == nullptr ||
+      (record->capabilities.capabilityBits &
+       node::capabilityMask(node::Capability::FirmwareUpdate)) == 0U) {
+    return false;
+  }
+  if (!firmwareTransfer_.start(nodeId, image, imageSize, sha256, nowMs)) {
+    return false;
+  }
+  firmwareReadyGeneration_ = transport_.readyGeneration();
+  return true;
+}
+
+const NodeFirmwareTransferStatus &NodeCoordinator::firmwareUpdateStatus() const {
+  return firmwareTransfer_.status();
+}
+
 void NodeCoordinator::onBindResponse(const node::RequestOutcome outcome,
                                      const node::Envelope *response,
                                      void *context) {
@@ -183,33 +247,6 @@ void NodeCoordinator::onBindResponse(const node::RequestOutcome outcome,
           coordinator.registry_.find(coordinator.transport_.remoteNodeId())) {
     record->capabilities.bound = true;
   }
-}
-
-void NodeCoordinator::onSceneReceipt(const node::RequestOutcome outcome,
-                                     const node::Envelope *response,
-                                     void *context) {
-  auto &coordinator = *static_cast<NodeCoordinator *>(context);
-  const uint32_t expectedRevision = coordinator.pendingSceneRevision_;
-  coordinator.pendingSceneCorrelation_ = 0;
-  coordinator.pendingSceneRevision_ = 0;
-
-  if (outcome != node::RequestOutcome::Response || response == nullptr) {
-    // Packet loss is handled with a bounded retry after the receipt timeout.
-    coordinator.sceneSentGeneration_ = 0;
-    return;
-  }
-
-  node::CommandReceiptPayload receipt{};
-  if (node::readCommandReceipt(*response, receipt) != node::CodecResult::Ok) {
-    coordinator.sceneSentGeneration_ = 0;
-    return;
-  }
-  coordinator.registry_.recordCommandReceipt(response->sourceNodeId, receipt,
-                                             coordinator.lastTickMs_);
-  coordinator.sceneSentGeneration_ = coordinator.transport_.readyGeneration();
-  // A rejected scene is terminal for this revision. The error remains in the
-  // registry; changing the scene or reconnecting explicitly creates a retry.
-  coordinator.acknowledgedSceneRevision_ = expectedRevision;
 }
 
 void NodeCoordinator::onStatusResponse(const node::RequestOutcome outcome,
@@ -272,19 +309,6 @@ void NodeCoordinator::onLedCountReceipt(
   coordinator.statusRequestedGeneration_ = 0;
 }
 
-void NodeCoordinator::observeScene(
-    const PersistedLightingState &lightingState,
-    const LightingSnapshot &lightingRuntime) {
-  const node::SceneSnapshotPayload next =
-      makeSceneSnapshot(lightingState, lightingRuntime);
-  if (hasScene_ && sameSceneSnapshot(currentScene_, next)) return;
-  currentScene_ = next;
-  hasScene_ = true;
-  ++sceneRevision_;
-  if (sceneRevision_ == 0) ++sceneRevision_;
-  sceneSentGeneration_ = 0;
-}
-
 void NodeCoordinator::observeTransportLifecycle(const uint32_t nowMs) {
   if (transport_.ready()) {
     transportWasReady_ = true;
@@ -292,11 +316,10 @@ void NodeCoordinator::observeTransportLifecycle(const uint32_t nowMs) {
   }
   if (!transportWasReady_) return;
 
+  firmwareTransfer_.onDisconnected();
+
   if (activeNodeId_ != 0) registry_.markOffline(activeNodeId_, nowMs);
   if (pendingBindCorrelation_ != 0) bus_.cancelResponse(pendingBindCorrelation_);
-  if (pendingSceneCorrelation_ != 0) {
-    bus_.cancelResponse(pendingSceneCorrelation_);
-  }
   if (pendingStatusCorrelation_ != 0) {
     bus_.cancelResponse(pendingStatusCorrelation_);
   }
@@ -310,8 +333,6 @@ void NodeCoordinator::observeTransportLifecycle(const uint32_t nowMs) {
     bus_.cancelResponse(pendingLedCountCorrelation_);
   }
   pendingBindCorrelation_ = 0;
-  pendingSceneCorrelation_ = 0;
-  pendingSceneRevision_ = 0;
   pendingStatusCorrelation_ = 0;
   pendingControlModeCorrelation_ = 0;
   pendingIndependentSceneCorrelation_ = 0;
@@ -319,7 +340,6 @@ void NodeCoordinator::observeTransportLifecycle(const uint32_t nowMs) {
   statusRequestedGeneration_ = 0;
   bindingReady_ = false;
   bindingRequested_ = false;
-  sceneSentGeneration_ = 0;
   statusRequestedGeneration_ = 0;
   activeNodeId_ = 0;
   transportWasReady_ = false;
@@ -329,19 +349,26 @@ void NodeCoordinator::handleReadyGeneration(const uint32_t nowMs) {
   const uint32_t generation = transport_.readyGeneration();
   if (generation == handledReadyGeneration_) return;
   handledReadyGeneration_ = generation;
-  sceneSentGeneration_ = 0;
+  if (firmwareTransfer_.status().state ==
+          NodeFirmwareTransferState::Succeeded &&
+      generation != firmwareReadyGeneration_) {
+    firmwareTransfer_.reset();
+    firmwareReadyGeneration_ = 0U;
+  }
   bindingRequested_ = false;
   pendingBindCorrelation_ = 0;
   const node::CapabilitiesPayload &capabilities = transport_.capabilities();
-  registry_.registerCapabilities(transport_.remoteNodeId(), capabilities,
-                                 nowMs);
   activeNodeId_ = transport_.remoteNodeId();
   bindingReady_ = capabilities.bound;
+  if (bindingReady_ || bindingAllowed_) {
+    registry_.registerCapabilities(activeNodeId_, capabilities, nowMs);
+  }
 }
 
 void NodeCoordinator::handleInbound(const uint32_t nowMs) {
   node::Envelope envelope{};
   while (transport_.popInbound(envelope)) {
+    if (firmwareTransfer_.handleInbound(envelope)) continue;
     if (bus_.resolveResponse(envelope)) continue;
     if (envelope.messageType == node::MessageType::StatusSnapshot) {
       node::StatusSnapshotPayload status{};
@@ -378,35 +405,6 @@ void NodeCoordinator::requestBinding(const uint32_t nowMs) {
   }
   pendingBindCorrelation_ = envelope.correlationId;
   bindingRequested_ = true;
-}
-
-bool NodeCoordinator::sendScene(const uint32_t nowMs) {
-  if (!hasScene_ || sceneRevision_ == 0 || pendingSceneCorrelation_ != 0) {
-    return false;
-  }
-  node::Envelope envelope{};
-  envelope.messageType = node::MessageType::SceneSnapshot;
-  envelope.channelId = static_cast<uint16_t>(node::TopicId::SpaceScene);
-  envelope.flags = node::kFlagRequiresAck;
-  envelope.sourceNodeId = node::kCoordinatorNodeId;
-  envelope.targetNodeId = transport_.remoteNodeId();
-  envelope.sequence = outboundSequence_++;
-  envelope.timestampMs = nowMs;
-  envelope.sceneRevision = sceneRevision_;
-  envelope.correlationId = correlationSequence_++;
-  node::writeSceneSnapshot(envelope, currentScene_);
-  if (bus_.awaitResponse(envelope.correlationId,
-                         nowMs + kSceneReceiptTimeoutMs, onSceneReceipt,
-                         this) != node::BusResult::Ok) {
-    return false;
-  }
-  if (!transport_.send(envelope)) {
-    bus_.cancelResponse(envelope.correlationId);
-    return false;
-  }
-  pendingSceneCorrelation_ = envelope.correlationId;
-  pendingSceneRevision_ = sceneRevision_;
-  return true;
 }
 
 bool NodeCoordinator::requestStatus(const uint32_t nowMs) {
@@ -463,7 +461,7 @@ void NodeCoordinator::sendAudio(const uint32_t nowMs, const EffectMode mode,
   envelope.targetNodeId = transport_.remoteNodeId();
   envelope.sequence = outboundSequence_++;
   envelope.timestampMs = nowMs;
-  envelope.sceneRevision = sceneRevision_;
+  envelope.sceneRevision = 0U;
   node::writeAudioFeatures(envelope, makeAudioFeatures(audioFrame));
   transport_.send(envelope);
 }

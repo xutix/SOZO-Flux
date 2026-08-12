@@ -20,7 +20,6 @@ LightingController::LightingController(lighting::LedOutput &output)
 
 void LightingController::begin(const PersistedLightingState &state) {
   state_ = normalize(state);
-  modeBeforeOff_ = state_.mode == EffectMode::Off ? EffectMode::Static : state_.mode;
   renderer_.setLogicalLedCount(state_.layout.activeCount);
   renderer_.setState(state_);
   output_.begin(geometry());
@@ -33,74 +32,9 @@ void LightingController::begin(const PersistedLightingState &state) {
   manualLitPixelCount_ = -1;
 }
 
-bool LightingController::apply(const ControlCommand &command) {
-  if (!isCommandWellFormed(command)) return false;
-  PersistedLightingState next = state_;
-  switch (command.type) {
-    case ControlCommandType::SetEffect:
-      next.mode = static_cast<EffectMode>(command.value);
-      break;
-    case ControlCommandType::SetParameter:
-      switch (command.parameter) {
-        case LightingParameter::Brightness: next.brightness = static_cast<uint8_t>(command.value); break;
-        case LightingParameter::PrimaryColor: next.primaryColor = command.color; break;
-        case LightingParameter::RainbowStyle: next.lighting.rainbowStyle = static_cast<uint8_t>(command.value); break;
-        case LightingParameter::FlowSpeed: next.lighting.flowSpeed = static_cast<uint8_t>(command.value); break;
-        case LightingParameter::CometTail: next.lighting.cometTail = static_cast<uint8_t>(command.value); break;
-        case LightingParameter::CometSpeed: next.lighting.cometSpeed = static_cast<uint8_t>(command.value); break;
-        case LightingParameter::CometDensity: next.lighting.cometDensity = static_cast<uint8_t>(command.value); break;
-        case LightingParameter::CometBackground: next.lighting.cometBackground = static_cast<uint8_t>(command.value); break;
-        case LightingParameter::CometRandom: next.lighting.cometRandom = command.value != 0; break;
-        case LightingParameter::AudioSensitivity: next.lighting.audioSensitivityX100 = static_cast<uint16_t>(command.value); break;
-        case LightingParameter::AudioColorGain: next.lighting.audioColorGainX100 = static_cast<uint16_t>(command.value); break;
-        case LightingParameter::AudioHueDrive: next.lighting.audioHueDrive = static_cast<uint8_t>(command.value); break;
-        case LightingParameter::BreathFloor: next.lighting.breathFloorPercent = static_cast<uint8_t>(command.value); break;
-        case LightingParameter::SecondaryColor:
-          next.lighting.secondaryRed = command.color.red;
-          next.lighting.secondaryGreen = command.color.green;
-          next.lighting.secondaryBlue = command.color.blue;
-          break;
-        case LightingParameter::PulseAmplitude: next.lighting.pulseAmplitudePercent = static_cast<uint8_t>(command.value); break;
-        case LightingParameter::PulseHeight: next.lighting.pulseHeightPercent = static_cast<uint8_t>(command.value); break;
-        case LightingParameter::AnimationBrightness: next.lighting.animationBrightness = static_cast<uint8_t>(command.value); break;
-        case LightingParameter::AudioColorStyle: next.audioColorStyle = static_cast<uint8_t>(command.value); break;
-        case LightingParameter::CometColorStyle: next.cometColorStyle = static_cast<uint8_t>(command.value); break;
-        case LightingParameter::StartupColor: next.startupColor = command.color; break;
-        case LightingParameter::StartupAnimationSpeed: next.startupAnimationSpeed = command.value / 100.0F; break;
-        case LightingParameter::ManualLitPixelCount:
-          setLitPixelCount(static_cast<uint16_t>(command.value));
-          return true;
-        case LightingParameter::None:
-        default:
-          return false;
-      }
-      break;
-    case ControlCommandType::TurnOff:
-      next.mode = EffectMode::Off;
-      break;
-    case ControlCommandType::TurnOn:
-      next.mode = modeBeforeOff_;
-      break;
-    case ControlCommandType::SetLayout:
-      next.layout = command.layout;
-      break;
-    case ControlCommandType::AdjustParameter:
-    case ControlCommandType::DeviceAction:
-    default:
-      return false;
-  }
-  setState(next);
-  return true;
-}
-
 void LightingController::setState(const PersistedLightingState &state) {
   const PersistedLightingState next = normalize(state);
   const bool layoutChanged = !sameLayout(state_.layout, next.layout);
-  if (next.mode == EffectMode::Off) {
-    if (state_.mode != EffectMode::Off) modeBeforeOff_ = state_.mode;
-  } else {
-    modeBeforeOff_ = next.mode;
-  }
   state_ = next;
   renderer_.setLogicalLedCount(state_.layout.activeCount);
   renderer_.setState(state_);
@@ -114,16 +48,9 @@ void LightingController::setState(const PersistedLightingState &state) {
 
 const PersistedLightingState &LightingController::state() const { return state_; }
 
-PersistedLightingState LightingController::persistedState() const {
-  PersistedLightingState persisted = state_;
-  persisted.mode = state_.mode == EffectMode::Off ? modeBeforeOff_ : state_.mode;
-  return persisted;
-}
-
 void LightingController::setLitPixelCount(const uint16_t count) {
   const uint16_t limited = std::min(count, state_.layout.activeCount);
   state_.mode = EffectMode::Static;
-  modeBeforeOff_ = EffectMode::Static;
   manualLitPixelCount_ = static_cast<int16_t>(limited);
   clearFrame();
   const Rgb color = scaleRgb(state_.primaryColor, state_.brightness);

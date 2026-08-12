@@ -4,7 +4,7 @@
 
 namespace spatial_light {
 
-constexpr uint16_t kDefaultLedCount = 308;
+constexpr uint16_t kDefaultLedCount = 144;
 constexpr uint16_t kMaxLedCount = 1024;
 
 enum class LayoutProfile : uint8_t { Continuous = 0, Segmented = 1 };

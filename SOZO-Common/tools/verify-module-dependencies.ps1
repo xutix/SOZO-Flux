@@ -13,12 +13,13 @@ $coreModules = @(
   "SozoDomain",
   "SpatialLightCore",
   "SozoLightingCore",
+  "SozoSceneCore",
   "SozoNodeProtocol",
   "SozoBusCore"
 )
 $forbiddenTokens = @(
   "Arduino.h",
-  "Adafruit_NeoPixel",
+  "concrete LED driver",
   "FastLED",
   "NimBLE",
   "WiFi",

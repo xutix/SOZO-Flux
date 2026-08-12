@@ -93,6 +93,12 @@ struct StatusSnapshotPayload {
   NodeControlMode controlMode{NodeControlMode::FollowMain};
   bool pairingWindowOpen{false};
   uint16_t ledCount{0};
+  uint8_t layoutProfile{0};
+  uint16_t centerIndex{0};
+  uint16_t leftCount{0};
+  uint16_t centerCount{0};
+  uint16_t rightCount{0};
+  uint8_t spatialFlags{0};
 };
 
 struct ControlModePayload {
@@ -103,6 +109,59 @@ struct LedCountPayload {
   uint16_t ledCount{0};
 };
 
+struct LedGeometryPayload {
+  uint8_t layoutProfile{0};
+  uint16_t activeCount{0};
+  uint16_t centerIndex{0};
+  uint16_t leftCount{0};
+  uint16_t centerCount{0};
+  uint16_t rightCount{0};
+  uint8_t spatialFlags{0};
+};
+
+enum class FirmwareUpdateState : uint8_t {
+  Idle = 0,
+  Receiving = 1,
+  Verifying = 2,
+  ReadyToRestart = 3,
+  Failed = 4,
+};
+
+enum class FirmwareUpdateError : uint16_t {
+  None = 0,
+  Unauthorized = 1,
+  InvalidImage = 2,
+  ImageTooLarge = 3,
+  WriteFailed = 4,
+  HashMismatch = 5,
+  UnexpectedOffset = 6,
+  NotStarted = 7,
+  Timeout = 8,
+  LinkLost = 9,
+  Unsupported = 10,
+  Busy = 11,
+};
+
+struct FirmwareBeginPayload {
+  uint32_t imageSize{0};
+  uint8_t sha256[32]{};
+};
+
+constexpr uint16_t kFirmwareChunkDataBytes = kMaxPayloadBytes - 4U;
+
+struct FirmwareChunkPayload {
+  uint32_t offset{0};
+  uint16_t dataLength{0};
+  uint8_t data[kFirmwareChunkDataBytes]{};
+};
+
+struct FirmwareStatusPayload {
+  FirmwareUpdateState state{FirmwareUpdateState::Idle};
+  uint32_t nextOffset{0};
+  uint32_t imageSize{0};
+  FirmwareUpdateError error{FirmwareUpdateError::None};
+};
+
 constexpr uint16_t kCapabilitiesWireBytes = 17;
 constexpr uint16_t kHeartbeatWireBytes = 16;
 constexpr uint16_t kSceneSnapshotWireBytes = 30;
@@ -110,10 +169,14 @@ constexpr uint16_t kAudioFeaturesWireBytes = 13;
 constexpr uint16_t kBindRequestWireBytes = 8;
 constexpr uint16_t kBindResultWireBytes = 11;
 constexpr uint16_t kCommandReceiptWireBytes = 7;
-constexpr uint16_t kStatusSnapshotWireBytes = 14;
+constexpr uint16_t kStatusSnapshotWireBytes = 24;
 constexpr uint16_t kStatusRequestWireBytes = 0;
 constexpr uint16_t kControlModeWireBytes = 1;
 constexpr uint16_t kLedCountWireBytes = 2;
+constexpr uint16_t kLedGeometryWireBytes = 12;
+constexpr uint16_t kFirmwareBeginWireBytes = 36;
+constexpr uint16_t kFirmwareChunkHeaderWireBytes = 4;
+constexpr uint16_t kFirmwareStatusWireBytes = 11;
 
 CodecResult writeCapabilities(Envelope &envelope,
                               const CapabilitiesPayload &payload);
@@ -156,5 +219,23 @@ CodecResult writeLedCountRequest(Envelope &envelope,
                                  const LedCountPayload &payload);
 CodecResult readLedCountRequest(const Envelope &envelope,
                                 LedCountPayload &payload);
+CodecResult writeLedGeometryRequest(Envelope &envelope,
+                                    const LedGeometryPayload &payload);
+CodecResult readLedGeometryRequest(const Envelope &envelope,
+                                   LedGeometryPayload &payload);
+CodecResult writeFirmwareBegin(Envelope &envelope,
+                               const FirmwareBeginPayload &payload);
+CodecResult readFirmwareBegin(const Envelope &envelope,
+                              FirmwareBeginPayload &payload);
+CodecResult writeFirmwareChunk(Envelope &envelope,
+                               const FirmwareChunkPayload &payload);
+CodecResult readFirmwareChunk(const Envelope &envelope,
+                              FirmwareChunkPayload &payload);
+CodecResult writeFirmwareEnd(Envelope &envelope);
+CodecResult readFirmwareEnd(const Envelope &envelope);
+CodecResult writeFirmwareStatus(Envelope &envelope,
+                                const FirmwareStatusPayload &payload);
+CodecResult readFirmwareStatus(const Envelope &envelope,
+                               FirmwareStatusPayload &payload);
 
 }  // namespace sozo::node

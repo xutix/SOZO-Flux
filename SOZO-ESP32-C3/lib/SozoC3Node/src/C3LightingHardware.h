@@ -1,15 +1,17 @@
 #pragma once
 
-#include <Adafruit_NeoPixel.h>
+#include <FastLED.h>
 #include <LedOutput.h>
-#include <LightingController.h>
-#include <NodeSceneRuntime.h>
+#include <LightingControllerNodeSink.h>
 
 namespace sozo::c3 {
 
 class C3LightingOutput final : public lighting::LedOutput {
  public:
   C3LightingOutput(uint16_t capacity, uint8_t pin);
+  ~C3LightingOutput() override;
+  C3LightingOutput(const C3LightingOutput &) = delete;
+  C3LightingOutput &operator=(const C3LightingOutput &) = delete;
 
   void begin(const lighting::LedGeometry &geometry) override;
   void present(const lighting::LedGeometry &geometry,
@@ -18,22 +20,12 @@ class C3LightingOutput final : public lighting::LedOutput {
  private:
   uint16_t capacity_;
   uint16_t transmittedCount_{0};
+  uint8_t pin_;
   bool initialized_{false};
-  Adafruit_NeoPixel strip_;
+  CRGB *pixels_;
+  CLEDController *controller_{nullptr};
 };
 
-class LightingControllerSink final : public NodeLightingSink {
- public:
-  explicit LightingControllerSink(LightingController &controller);
-
-  void begin(const PersistedLightingState &state) override;
-  const PersistedLightingState &state() const override;
-  void applyState(const PersistedLightingState &state) override;
-  void setLitPixelCount(uint16_t count) override;
-  void tick(uint32_t now, const AudioFrame &audio) override;
-
- private:
-  LightingController &controller_;
-};
+using LightingControllerSink = ::sozo::LightingControllerNodeSink;
 
 }  // namespace sozo::c3

@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include <SozoDomain.h>
+#include <LightingPersistencePorts.h>
 
 namespace sozo {
 
@@ -13,7 +14,7 @@ constexpr bool isSettingsSaveDue(const bool dirty, const uint32_t dirtyAt,
   return dirty && now - dirtyAt >= kSettingsSaveDelayMs;
 }
 
-class SettingsStore {
+class SettingsStore final : public LightingConfigurationRepository {
  public:
   explicit SettingsStore(const char *nvsNamespace = "sozo-light");
 
@@ -21,9 +22,13 @@ class SettingsStore {
   void markDirty(uint32_t now);
   bool tick(uint32_t now, const PersistedLightingState &state);
 
-  bool loadWiFiCredentials(String &ssid, String &password);
-  bool saveWiFiCredentials(const String &ssid, const String &password);
-  bool clearWiFiCredentials();
+  void markLightingConfigurationDirty(uint32_t nowMs) override {
+    markDirty(nowMs);
+  }
+  bool persistLightingConfiguration(
+      uint32_t nowMs, const PersistedLightingState &state) override {
+    return tick(nowMs, state);
+  }
 
  private:
   bool saveLightingState(const PersistedLightingState &state);

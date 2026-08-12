@@ -13,6 +13,15 @@ SOZO Flux 当前处于 `v0.1.x` 平台收口期。变更应优先提高边界清
 
 提交信息使用简短的命令式格式，例如 `feat: add node capability snapshot`。
 
+## 固件身份与烧录保护
+
+- 正式固件只允许从本仓库的 `SOZO-ESP32-S3/`、`SOZO-ESP32-C3/` 和
+  `SOZO-Common/` 构建，不得从仓库外的旧工程、独立副本或实验目录烧录。
+- 未经用户明确要求修改产品身份，不得改动 `SOZO Flux`、`sozo-flux`、
+  `SOZO-FLUX-SETUP`、`SOZO-FLUX-C3-` 及对应网页标题。
+- 每次烧录必须在操作前确认仓库根目录和显式工程目录，在操作后验证设备身份与发现入口。
+- 详细检查清单以 [项目身份与烧录保护](docs/PROJECT-GUARDRAILS.md) 为准。
+
 ## 添加设备
 
 先在文档和共享领域模型中定义：

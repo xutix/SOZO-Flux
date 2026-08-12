@@ -17,10 +17,8 @@ class LightingController {
   explicit LightingController(lighting::LedOutput &output);
 
   void begin(const PersistedLightingState &state);
-  bool apply(const ControlCommand &command);
   void setState(const PersistedLightingState &state);
   const PersistedLightingState &state() const;
-  PersistedLightingState persistedState() const;
   void setLitPixelCount(uint16_t count);
   void tick(uint32_t nowMs, const AudioFrame &audio);
   LightingSnapshot snapshot() const;
@@ -36,7 +34,6 @@ class LightingController {
   LightingRenderer renderer_;
   LightingFrame frame_{};
   PersistedLightingState state_{makeDefaultPersistedLightingState()};
-  EffectMode modeBeforeOff_{EffectMode::Static};
   bool started_{false};
   bool startupAnimationActive_{true};
   float startupProgress_{0.0F};

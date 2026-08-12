@@ -7,15 +7,15 @@ constexpr char NodeControlStore::kStateKey[];
 
 namespace {
 
-bool hasSupportedMode(const node::NodeControlMode mode) {
-  return mode == node::NodeControlMode::FollowMain ||
-         mode == node::NodeControlMode::Independent;
+bool hasSupportedMode(const LightControlMode mode) {
+  return mode == LightControlMode::FollowScene ||
+         mode == LightControlMode::Independent;
 }
 
 bool isValid(const NodeControlState &state) {
   return state.schemaVersion == NodeControlState::kSchemaVersion &&
          hasSupportedMode(state.controlMode) &&
-         (state.controlMode != node::NodeControlMode::Independent ||
+         (state.controlMode != LightControlMode::Independent ||
           state.hasIndependentScene);
 }
 

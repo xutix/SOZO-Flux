@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <CommandRouter.h>
+#include <LightingControlApplication.h>
 
 static_assert(sozo::isSourceAllowedForCommand(
                   sozo::ControlSource::Web,

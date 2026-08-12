@@ -4,9 +4,11 @@
 #include <WebServer.h>
 
 #include <AudioAnalyzer.h>
-#include <CommandRouter.h>
+#include <LightingControlApplication.h>
 #include <NetworkManager.h>
-#include <NodeCoordinator.h>
+#include <NodeNameStore.h>
+#include <NodeFleetCoordinator.h>
+#include <NodeFirmwareWebController.h>
 
 namespace sozo {
 
@@ -15,8 +17,10 @@ class WebApi {
   using RestartCallback = void (*)();
   using PageBuilder = String (*)();
 
-  WebApi(CommandRouter &commands, NetworkManager &network,
-         AudioAnalyzer &audio, NodeCoordinator &nodes, PageBuilder spatialPage,
+  WebApi(LightingControlApplication &lighting, NetworkManager &network,
+         AudioAnalyzer &audio, NodeFleetCoordinator &nodes,
+         NodeNameStore &nodeNames,
+         PageBuilder spatialPage,
          RestartCallback restart);
 
   void begin();
@@ -28,15 +32,23 @@ class WebApi {
   void handleRoot();
   void handleApiStatus();
   void handleGetNodes();
+  void handleOpenNodePairing();
   void handleWiFiScan();
   void handleWiFiSave();
   void handleWiFiReset();
   void handleGetLayout();
   void handleSetLayout();
   void handleSetLighting();
-  void handleSetNodeMode();
   void handleSetNodeLighting();
   void handleSetNodeLedCount();
+  void handleSetNodeLayout();
+  void handleSetNodeName();
+  void handleGetScenes();
+  void handleSaveScene();
+  void handleSetSceneAssignment();
+  void handleActivateScene();
+  void handleDeleteScene();
+  void handleSetTargetLighting();
   void handleSetMode();
   void handleSetColor();
   void handleSetBrightness();
@@ -52,17 +64,15 @@ class WebApi {
   bool dispatchWebLayout(const spatial_light::SpatialLayout &layout);
   String buildLayoutJson() const;
   String buildLightingSettingsJson() const;
-  bool parseLightingRequest(PersistedLightingState &next,
-                            EffectMode &requestedMode, bool allowNodeId,
-                            String &error);
-
   WebServer server_;
-  CommandRouter &commands_;
+  LightingControlApplication &lighting_;
   NetworkManager &network_;
   AudioAnalyzer &audio_;
-  NodeCoordinator &nodes_;
+  NodeFleetCoordinator &nodes_;
+  NodeNameStore &nodeNames_;
   PageBuilder spatialPage_;
   RestartCallback restart_;
+  NodeFirmwareWebController nodeFirmware_;
 };
 
 }  // namespace sozo

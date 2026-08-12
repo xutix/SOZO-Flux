@@ -8,7 +8,7 @@ namespace sozo::node {
 using NodeId = uint32_t;
 
 constexpr uint16_t kProtocolMagic = 0x535AU;
-constexpr uint8_t kProtocolVersion = 1;
+constexpr uint8_t kProtocolVersion = 2;
 constexpr NodeId kCoordinatorNodeId = 1U;
 constexpr NodeId kBroadcastNodeId = 0xFFFFFFFFU;
 constexpr uint16_t kHeaderBytes = 34;
@@ -34,6 +34,11 @@ enum class MessageType : uint8_t {
   StatusRequest = 10,
   ControlModeRequest = 11,
   LedCountRequest = 12,
+  FirmwareBegin = 13,
+  FirmwareChunk = 14,
+  FirmwareEnd = 15,
+  FirmwareStatus = 16,
+  LedGeometryRequest = 17,
 };
 
 enum class TopicId : uint16_t {
@@ -55,6 +60,8 @@ enum class ServiceId : uint16_t {
   RestartNode = 104,
   ClearBinding = 105,
   SetLedCount = 106,
+  UpdateFirmware = 107,
+  SetLedGeometry = 108,
 };
 
 enum class NodeControlMode : uint8_t {
@@ -69,6 +76,7 @@ enum class Capability : uint32_t {
   ButtonInput = 1U << 1U,
   RotaryInput = 1U << 2U,
   SensorInput = 1U << 3U,
+  FirmwareUpdate = 1U << 4U,
 };
 
 constexpr uint32_t capabilityMask(const Capability capability) {
@@ -105,7 +113,7 @@ enum class CodecResult : uint8_t {
 
 constexpr bool isKnownMessageType(const MessageType type) {
   return type >= MessageType::Capabilities &&
-         type <= MessageType::LedCountRequest;
+         type <= MessageType::LedGeometryRequest;
 }
 
 size_t encodedSize(const Envelope &envelope);

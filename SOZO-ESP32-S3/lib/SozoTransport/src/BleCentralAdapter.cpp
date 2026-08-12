@@ -26,46 +26,42 @@ bool BleCentralAdapter::begin() {
   }
   if (instanceIndex == kMaxAdapterInstances) return false;
 
-  candidateQueue_ = xQueueCreate(1, sizeof(Candidate));
   workerCommandQueue_ = xQueueCreate(1, sizeof(WorkerCommand));
   workerEventQueue_ =
       xQueueCreate(kWorkerEventQueueCapacity, sizeof(WorkerEvent));
   inboundQueue_ = xQueueCreate(kInboundQueueCapacity, sizeof(node::Envelope));
-  if (candidateQueue_ == nullptr || workerCommandQueue_ == nullptr ||
-      workerEventQueue_ == nullptr || inboundQueue_ == nullptr) {
-    if (candidateQueue_ != nullptr) vQueueDelete(candidateQueue_);
+  workerWakeSemaphore_ = xSemaphoreCreateBinary();
+  if (workerCommandQueue_ == nullptr || workerEventQueue_ == nullptr ||
+      inboundQueue_ == nullptr || workerWakeSemaphore_ == nullptr) {
     if (workerCommandQueue_ != nullptr) vQueueDelete(workerCommandQueue_);
     if (workerEventQueue_ != nullptr) vQueueDelete(workerEventQueue_);
     if (inboundQueue_ != nullptr) vQueueDelete(inboundQueue_);
-    candidateQueue_ = nullptr;
+    if (workerWakeSemaphore_ != nullptr) {
+      vSemaphoreDelete(workerWakeSemaphore_);
+    }
     workerCommandQueue_ = nullptr;
     workerEventQueue_ = nullptr;
     inboundQueue_ = nullptr;
+    workerWakeSemaphore_ = nullptr;
     return false;
   }
 
-  if (!NimBLEDevice::init("SOZO-Flux-Coordinator")) return false;
-  NimBLEDevice::setMTU(ble::kPreferredMtu);
-  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
-  NimBLEDevice::setSecurityAuth(true, false, true);
-
-  scan_ = NimBLEDevice::getScan();
-  if (scan_ == nullptr) return false;
-  scan_->setScanCallbacks(this, false);
-  scan_->setInterval(160);
-  scan_->setWindow(40);
-  scan_->setActiveScan(true);
-  scan_->setMaxResults(0);
-
   if (xTaskCreate(workerEntry, "sozo-ble-worker", kWorkerStackBytes, this,
                   kWorkerPriority, &workerTask_) != pdPASS) {
+    vQueueDelete(workerCommandQueue_);
+    vQueueDelete(workerEventQueue_);
+    vQueueDelete(inboundQueue_);
+    vSemaphoreDelete(workerWakeSemaphore_);
+    workerCommandQueue_ = nullptr;
+    workerEventQueue_ = nullptr;
+    inboundQueue_ = nullptr;
+    workerWakeSemaphore_ = nullptr;
     workerTask_ = nullptr;
     return false;
   }
 
   instances_[instanceIndex] = this;
   initialized_ = true;
-  startScan();
   return true;
 }
 
@@ -81,35 +77,22 @@ void BleCentralAdapter::tick(const uint32_t nowMs) {
     enterBackoff(nowMs, BleLinkEvent::Failed);
   }
 
-  Candidate candidate{};
-  if (link_.state() == BleLinkState::Scanning && !workerBusy() &&
-      xQueueReceive(candidateQueue_, &candidate, 0) == pdTRUE) {
-    launchConnect(candidate, nowMs);
-  }
-
-  bool scanEnded = false;
-  portENTER_CRITICAL(&stateMux_);
-  scanEnded = scanEnded_;
-  scanEnded_ = false;
-  portEXIT_CRITICAL(&stateMux_);
-  if (link_.state() == BleLinkState::Scanning && scanEnded && !workerBusy()) {
-    startScan();
-  }
-
   if (link_.state() == BleLinkState::Backoff && !workerBusy() &&
       static_cast<int32_t>(nowMs - retryAtMs_) >= 0) {
     link_.handle(BleLinkEvent::RetryDue);
-    startScan();
+    launchConnect(assignedCandidate_, nowMs);
   }
 }
 
 bool BleCentralAdapter::send(const node::Envelope &envelope) {
-  if (!ready() || workerTask_ == nullptr) return false;
+  if (!ready() || workerTask_ == nullptr || workerWakeSemaphore_ == nullptr) {
+    return false;
+  }
   bool accepted = false;
   portENTER_CRITICAL(&outboundMux_);
   accepted = outbound_.push(envelope);
   portEXIT_CRITICAL(&outboundMux_);
-  if (accepted) xTaskNotifyGive(workerTask_);
+  if (accepted) xSemaphoreGive(workerWakeSemaphore_);
   return accepted;
 }
 
@@ -202,22 +185,57 @@ uint32_t BleCentralAdapter::timeoutCount() const {
   return operationSupervisor_.timeoutCount();
 }
 
-void BleCentralAdapter::onResult(const NimBLEAdvertisedDevice *device) {
-  if (device == nullptr ||
-      !device->isAdvertisingService(NimBLEUUID(ble::kServiceUuid))) {
-    return;
+bool BleCentralAdapter::connect(const uint64_t address,
+                                const uint8_t addressType,
+                                const uint32_t nowMs) {
+  if (!initialized_ || address == 0U || assigned() || workerBusy()) {
+    return false;
   }
-  Candidate candidate{};
-  candidate.address = static_cast<uint64_t>(device->getAddress());
-  candidate.addressType = device->getAddressType();
-  xQueueOverwrite(candidateQueue_, &candidate);
-  if (scan_ != nullptr) scan_->stop();
+  portENTER_CRITICAL(&stateMux_);
+  assignedCandidate_.address = address;
+  assignedCandidate_.addressType = addressType;
+  assigned_ = true;
+  portEXIT_CRITICAL(&stateMux_);
+  link_.reset();
+  link_.handle(BleLinkEvent::StartScan);
+  launchConnect(assignedCandidate_, nowMs);
+  return true;
 }
 
-void BleCentralAdapter::onScanEnd(const NimBLEScanResults &, int) {
+bool BleCentralAdapter::assigned() const {
+  bool value = false;
   portENTER_CRITICAL(&stateMux_);
-  scanEnded_ = true;
+  value = assigned_;
   portEXIT_CRITICAL(&stateMux_);
+  return value;
+}
+
+uint64_t BleCentralAdapter::peerAddress() const {
+  uint64_t value = 0U;
+  portENTER_CRITICAL(&stateMux_);
+  value = assignedCandidate_.address;
+  portEXIT_CRITICAL(&stateMux_);
+  return value;
+}
+
+bool BleCentralAdapter::release() {
+  if (!assigned()) return false;
+  const uint32_t attemptId = attemptGate_.current();
+  attemptGate_.cancelCurrent();
+  cancelWorkerAttempt(attemptId);
+  NimBLEClient *client = nullptr;
+  portENTER_CRITICAL(&stateMux_);
+  client = client_;
+  assigned_ = false;
+  assignedCandidate_ = Candidate{};
+  portEXIT_CRITICAL(&stateMux_);
+  if (client != nullptr && client->isConnected()) client->disconnect();
+  clearConnectionState();
+  clearOutbound();
+  operationSupervisor_.complete();
+  setOperationStage(BleOperationStage::Idle);
+  link_.reset();
+  return true;
 }
 
 void BleCentralAdapter::onConnect(NimBLEClient *) {}
@@ -341,7 +359,7 @@ void BleCentralAdapter::runConnectAttempt(const WorkerCommand &command) {
   while (client->isConnected() && workerAttemptActive(command.attemptId)) {
     node::Envelope envelope{};
     if (!popOutbound(envelope)) {
-      ulTaskNotifyTake(pdTRUE, kWorkerPollTicks);
+      xSemaphoreTake(workerWakeSemaphore_, kWorkerPollTicks);
       continue;
     }
     if (!writeEnvelope(envelope, command.attemptId)) {
@@ -558,19 +576,6 @@ void BleCentralAdapter::launchConnect(const Candidate &candidate,
   }
 }
 
-void BleCentralAdapter::startScan() {
-  if (scan_ == nullptr || scan_->isScanning() || workerBusy()) return;
-  if (link_.state() == BleLinkState::Idle) {
-    link_.handle(BleLinkEvent::StartScan);
-  }
-  if (link_.state() != BleLinkState::Scanning) return;
-  xQueueReset(candidateQueue_);
-  portENTER_CRITICAL(&stateMux_);
-  scanEnded_ = false;
-  portEXIT_CRITICAL(&stateMux_);
-  scan_->start(0, false, true);
-}
-
 void BleCentralAdapter::enterBackoff(const uint32_t nowMs,
                                      const BleLinkEvent event) {
   attemptGate_.cancelCurrent();
@@ -621,7 +626,7 @@ void BleCentralAdapter::cancelWorkerAttempt(const uint32_t attemptId) {
   portENTER_CRITICAL(&stateMux_);
   if (activeWorkerAttemptId_ == attemptId) workerAttemptCancelled_ = true;
   portEXIT_CRITICAL(&stateMux_);
-  if (workerTask_ != nullptr) xTaskNotifyGive(workerTask_);
+  if (workerWakeSemaphore_ != nullptr) xSemaphoreGive(workerWakeSemaphore_);
 }
 
 bool BleCentralAdapter::workerAttemptActive(const uint32_t attemptId) const {

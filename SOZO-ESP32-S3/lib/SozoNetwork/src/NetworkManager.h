@@ -3,7 +3,7 @@
 #include <Arduino.h>
 #include <vector>
 
-#include <SettingsStore.h>
+#include <NetworkCredentialRepository.h>
 
 namespace sozo {
 
@@ -38,7 +38,7 @@ struct ScannedNetwork {
 
 class NetworkManager {
  public:
-  explicit NetworkManager(SettingsStore &settings);
+  explicit NetworkManager(NetworkCredentialRepository &credentials);
 
   bool begin();
   void tick();
@@ -52,7 +52,7 @@ class NetworkManager {
   bool startProvisioningAccessPoint();
   bool startMdns();
 
-  SettingsStore &settings_;
+  NetworkCredentialRepository &credentials_;
   String savedSsid_;
   String savedPassword_;
   NetworkStatus status_;

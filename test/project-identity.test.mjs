@@ -8,20 +8,20 @@ test('release manifest separates platform, firmware, node, and protocol versions
   const manifest = await read('VERSION');
   assert.match(manifest, /^platform=0\.1\.0-alpha$/m);
   assert.match(manifest, /^gateway_s3=0\.1\.0-alpha$/m);
-  assert.match(manifest, /^node_c3=0\.1\.0-alpha$/m);
-  assert.match(manifest, /^protocol=1$/m);
+  assert.match(manifest, /^node_c3=0\.2\.1-alpha$/m);
+  assert.match(manifest, /^protocol=2$/m);
 
   const versionHeader = await read(
     'SOZO-Common/lib/SozoVersion/src/SozoVersion.h',
   );
   assert.match(versionHeader, /kPlatform\[\] = "0\.1\.0-alpha"/);
   assert.match(versionHeader, /kGatewayS3\[\] = "0\.1\.0-alpha"/);
-  assert.match(versionHeader, /kNodeC3\[\] = "0\.1\.0-alpha"/);
+  assert.match(versionHeader, /kNodeC3\[\] = "0\.2\.1-alpha"/);
 
   const protocolHeader = await read(
     'SOZO-Common/lib/SozoNodeProtocol/src/SozoNodeProtocol.h',
   );
-  assert.match(protocolHeader, /kProtocolVersion = 1/);
+  assert.match(protocolHeader, /kProtocolVersion = 2/);
 });
 
 test('public device surfaces use the SOZO Flux identity', async () => {
@@ -38,7 +38,7 @@ test('public device surfaces use the SOZO Flux identity', async () => {
 
   const controlPage = await read('SOZO-ESP32-S3/src/SpatialLightPage.cpp');
   assert.match(controlPage, /<title>SOZO Flux 空间灯光<\/title>/);
-  assert.match(controlPage, /SOZO FLUX · SPATIAL LIGHTING/);
+  assert.match(controlPage, /SOZO FLUX · SPATIAL CONTROL/);
 
   const setupPage = await read('SOZO-ESP32-S3/lib/SozoWeb/src/WebApi.cpp');
   assert.match(setupPage, /<title>SOZO Flux 网络设置<\/title>/);

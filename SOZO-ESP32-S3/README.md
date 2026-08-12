@@ -1,6 +1,6 @@
 # SOZO Flux Gateway S3
 
-本工程基于 PlatformIO 与 Arduino framework，适配 ESP32-S3-WROOM-1-N8R8（8MB Flash、8MB OPI PSRAM），支持 INMP441 拾音、固定 308 颗 WS2812 灯带、手机网页控制和音乐律动。
+本工程基于 PlatformIO 与 Arduino framework，适配 ESP32-S3-WROOM-1-N8R8（8MB Flash、8MB OPI PSRAM）。它作为 Flux Hub 维护命名场景和每条灯带的最终目标状态，并支持 INMP441 拾音、手机网页控制、音乐律动和一个默认 144 颗且可在网页灯光节点页调整的可选本地 WS2812 灯光节点。
 
 ## 接线
 
@@ -31,12 +31,17 @@ ESP32-S3 GND、INMP441 GND、灯带 GND 和外部电源 GND 必须共地。GPIO4
 
 - 不要使用开发板 5V 引脚给大数量灯带供电。
 - 使用足够容量的独立 5V 电源。
-- 308 颗灯满白、最大亮度的理论电流可能接近 18.5A。
+- 默认 144 颗灯满白、最大亮度的理论电流可能接近 8.7A；调整灯珠数量后必须按实际规模重新核算电源。
 - 建议灯带电源入口并联 1000uF 或更大的电解电容。
 - 长灯带建议多点注入电源，使用合适线径并增加保险保护。
 - 默认亮度为 `50/255`。
 
 ## 编译与烧录
+
+正式设备只能使用本仓库中的当前工程。不得从相邻的 `SOZO-ESP32-n8r8`、旧副本或实验
+目录构建/烧录。烧录前后必须执行仓库级
+[项目身份与烧录保护](../docs/PROJECT-GUARDRAILS.md)检查，尤其要确认固定入口仍为
+<http://sozo-flux.local>。
 
 ```bash
 pio run
@@ -95,6 +100,7 @@ upload_speed = 460800
 
 网页支持：
 
+- “空间 / 灯光节点 / 中枢系统”三个明确的操作范围
 - 静态颜色，包括任意自定义 RGB 颜色
 - 彩虹流动
 - 呼吸灯
@@ -109,14 +115,17 @@ upload_speed = 460800
 
 不再提供音量柱模式。状态每 500ms 局部刷新。
 
-网页设备状态区只显示当前模式和灯带亮度。选择某个灯效后，只显示该灯效相关的颜色模式和参数：
+“灯光控制”页把命名空间场景和所有单灯带作为平级目标。场景可包含多条输出，每条输出可使用
+不同灯效；发布场景时只更新列出的灯带，其他灯带保持上一次状态。单灯带控制只更新所选节点。
 
 - 静态与呼吸：显示颜色轮盘。
 - 彩虹：不显示颜色参数。
 - 拾音：显示拾音颜色样式、鼓点灵敏度、冲击强度；选择静态颜色样式时显示颜色轮盘。
 - 流星：显示流星颜色样式；选择静态颜色样式时显示颜色轮盘。
 
-灯珠数量固定为 308，不再提供网页或 API 修改接口。静态、彩虹、呼吸、拾音、流星和开机展开效果均按 308 颗灯计算。
+本地灯光节点默认使用 144 颗灯珠，可在“灯光节点”页选中它后调整灯珠几何与开机动画；这些配置只属于本地节点，不属于空间场景。
+
+不带本地灯带的 Hub 可使用 `esp32-s3-hub-only` 环境构建；协调器、网页、音频和远程节点管理仍正常运行。
 
 ## 断电记忆与开机动画
 
@@ -180,19 +189,29 @@ upload_speed = 460800
 - 灯效库提供：常亮、彩虹、流星、拾音灯、呼吸、桌面极光、火焰拾音、玻璃流光、四角脉冲、低频水波和专注。
 - 每个灯效只显示并保存其实际使用的参数；拾音灯效固定使用板载 INMP441。
 - 电脑音频频谱、电脑音频输入与电脑 FFT 参数暂未实现，也不会出现在网页中。
-- “空间布局”页可在连续空间和左／中／右逻辑分段之间切换，可设置总数量、空间中心/三段数量和方向反转。
-- 默认活动数量为 308 颗，软件允许配置 1–1024 颗。扩展灯带前必须检查 5V 电源容量、分段供电注入、线材和保险保护；1024 仅是软件上限，不代表推荐的供电规模。
+- “灯光控制”页管理多个可改名场景和所有单灯带；同一节点可出现在多个场景中，最后发布生效。
+- “灯光节点”页把 S3 本地灯带和 C3 作为平级节点展示。每个灯光节点都可以设置最多 16 个 Unicode 字符的显示名称；名称保存在 Flux Hub，留空保存会恢复默认名称，不会改变设备 ID、BLE 绑定或控制地址。
+- S3 与 C3 节点都可在连续灯带和左／中／右逻辑分段之间切换，并设置总数量、中心/三段数量和方向反转。
+- 本地节点默认活动数量为 144 颗，软件允许配置 1–1024 颗。扩展灯带前必须检查 5V 电源容量、分段供电注入、线材和保险保护；1024 仅是软件上限，不代表推荐的供电规模。
+- “中枢系统”页管理 Flux Hub 网络、节点添加窗口、版本状态与重启。
 - 布局和灯效参数在停止调整约 1 秒后写入 NVS，设备重启后会恢复。
 
 ### 新增 API
 
 | 路由 | 功能 |
 |---|---|
-| `GET /api/layout` | 获取空间布局与 1024 颗软件上限 |
-| `POST /api/layout` | 保存 `profile`、`activeCount`、连续中心或左/中/右数量、`reversed` |
-| `POST /api/lighting` | 保存 `effect`、亮度、颜色及该灯效的参数；仅接受 11 种设备灯效 |
+| `GET /api/layout` | 获取 S3 本地灯光节点的灯珠几何与 1024 颗软件上限 |
+| `POST /api/layout` | 保存本地节点的 `profile`、`activeCount`、连续中心或左/中/右数量、`reversed` |
+| `GET /api/scenes` | 获取命名场景、逐节点分配和每个节点的最终目标/投递状态 |
+| `POST /api/scene` | 新建、改名或调整场景成员；保留已有成员各自的灯效 |
+| `POST /api/scene/assignment` | 修改场景内某一条输出的灯效参数 |
+| `POST /api/scene/activate` | 只向场景列出的节点发布各自目标状态 |
+| `POST /api/target/lighting` | 直接更新一条灯带，不修改任何已保存场景 |
+| `POST /api/node/layout` | 通过 BLE 保存 C3 的完整物理布局并等待回执 |
+| `GET /api/nodes` | 获取远程节点的连接状态、能力、稳定设备 ID 和 Hub 侧显示名称 |
+| `POST /api/node/name` | 使用 `id=local-s3` 或 C3 的 8 位设备 ID 保存显示名称；远程节点离线时仍可修改，空名称恢复默认值 |
 
-`GET /api/status` 还会返回 `effect`、`settings` 和 `layout`，供网页恢复当前状态。旧版 `GET` 控制接口保留兼容，但新的网页只使用上述接口。
+`GET /api/status` 还会返回 `effect`、`settings`、本地节点 `layout`、`localLightName`、`sceneRevision`、Hub 版本和 `localLightEnabled`，供网页恢复三个作用域。旧版 `GET` 控制接口保留兼容，但新的网页只使用上述接口。
 
 ## PSRAM 排查
 
@@ -205,17 +224,20 @@ board_build.psram_type = opi
 
 ## Extensible control architecture
 
-The firmware has one authoritative lighting state and one command path. A
-transport adapter must create a `ControlCommand` and send it to
-`CommandRouter`; adapters must not write LED state or NVS directly.
+The firmware has one authoritative desired-lighting state and one application
+entry. Transport adapters send validated intents to
+`LightingControlApplication`; adapters must not write LED state or NVS
+directly. The S3 strip is an optional local light node and consumes the same
+`LightingScene` contract as a remote C3 node.
 
 | Responsibility | Module |
 |---|---|
 | Control vocabulary, sources, validation and persisted state | `lib/SozoDomain` |
+| Authoritative space scene and shared light-node runtime | `../SOZO-Common/lib/SozoSceneCore` |
 | Shared LED effects and spatial rendering | `../SOZO-Common/lib/SozoLightingCore` |
-| S3 NeoPixel strip output | `lib/SozoLightingAdapter` |
+| Optional S3 local-node FastLED output | `lib/SozoLightingAdapter` |
 | Microphone sampling and audio frame analysis | `lib/SozoAudio` |
-| Command authorization and delayed persistence | `lib/SozoControl` |
+| Lighting use cases, validation and persistence ports | `lib/SozoControl` |
 | Router Wi-Fi, mDNS and provisioning AP | `lib/SozoNetwork` |
 | Phone/computer HTTP interface | `lib/SozoWeb` |
 | USB serial interface | `lib/SozoSerial` |

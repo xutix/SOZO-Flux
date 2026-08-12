@@ -1,6 +1,6 @@
 # SOZO 代码架构手册
 
-> 适用范围：`SOZO-Common`、ESP32-S3 主设备、所有 ESP32-C3 或后续扩展节点。
+> 适用范围：`SOZO-Common`、ESP32-S3 Flux Hub、所有 ESP32-C3 或后续扩展节点。
 >
 > 本手册是 SOZO 固件的共同架构约束。新功能、修复和重构都必须遵守；不符合的旧逻辑要在相关改造中删除，而不是继续叠加。
 
@@ -34,7 +34,7 @@ SOZO 是一个可扩展的空间控制系统，而不是一条固定灯带。它
 核心模块：领域模型、SozoBus 协议、灯光渲染与几何
 ```
 
-核心和应用模块不得包含、引用或创建 `NimBLE`、`WiFi`、`WebServer`、`Preferences`、`Adafruit_NeoPixel`、`FastLED`、GPIO 或 Arduino 网络对象。适配器可以依赖内层接口；内层绝不能依赖具体适配器。
+核心和应用模块不得包含、引用或创建 `NimBLE`、`WiFi`、`WebServer`、`Preferences`、具体灯带驱动、GPIO 或 Arduino 网络对象。适配器可以依赖内层接口；内层绝不能依赖具体适配器。
 
 ### 2.2 单一状态所有者
 
@@ -91,6 +91,7 @@ Web / Serial / BLE / Wi-Fi / ESP-NOW / Voice                  LED / NVS / BLE / 
 - `SozoDomain`：统一术语对应的数据模型、范围校验和不变量。
 - `SozoNodeProtocol`：SozoBus 信封、消息、编解码和请求关联。
 - `SozoBusCore`：主题、服务和命令投递的通用规则。
+- `SozoSceneCore`：权威空间场景、灯光节点运行时和本地输出端口。
 - `SozoLightingCore`：颜色计算、灯珠几何、逻辑灯光帧和效果渲染。
 - 可在宿主机运行的纯逻辑测试。
 
@@ -101,7 +102,7 @@ Web / Serial / BLE / Wi-Fi / ESP-NOW / Voice                  LED / NVS / BLE / 
 S3 工程包含：
 
 - 协调器应用模块：场景权威、节点登记、节点生命周期、命令授权和场景发布。
-- 适配器：网页、串口、Wi-Fi、BLE Central、主灯带输出、NVS、板载音频。
+- 适配器：网页、串口、Wi-Fi、BLE Central、可选本地灯光节点输出、NVS、板载音频。
 - 组合根：只组装对象并逐个调用模块的 `tick()`。
 
 S3 不得包含 C3 的 GPIO、物理长度或 C3 灯效私有状态。
@@ -114,7 +115,7 @@ C3 工程包含：
 - 适配器：BLE Peripheral、C3 LED 输出、GPIO BOOT 键、本地绑定存储。
 - 组合根：只把适配器和应用模块接起来。
 
-C3 只消费 `LightingScene`，不拥有或修改主设备的权威场景。断开后采用“离线保持”：维持最后成功应用的场景，不伪造新的主场景。
+C3 只消费 `LightingScene`，不拥有或修改协调器的权威空间场景。断开后采用“离线保持”：维持最后成功应用的场景，不伪造新的空间场景。
 
 ## 5. 灯光渲染与物理灯珠
 
@@ -198,10 +199,10 @@ GPIO / 传感器 Adapter → NodeInputEvent → Node Application
 
 ## 8. 现有代码的重构方向
 
-截至 2026-08-03，灯效核心迁移已经落地：`LightingController`、`LightingRenderer`、全部灯效算法、`LightingFrame`、`LedGeometry` 与 `LedOutput` 位于 `SOZO-Common/SozoLightingCore`。S3 与 C3 只保留各自的 NeoPixel 输出适配器，C3 编译配置不再引用 S3 工程。
+截至 2026-08-08，灯效核心与节点运行时迁移已经落地：`LightingRenderer`、全部灯效算法、`LightingFrame`、`LedGeometry` 与 `LedOutput` 位于 `SozoLightingCore`；权威空间场景和 S3/C3 共用的灯光节点运行时位于 `SozoSceneCore`。S3 与 C3 只保留各自的 NeoPixel 输出适配器，C3 编译配置不再引用 S3 工程。
 
 1. 将目前只在 S3 工程内、却被 C3 引用的领域和灯效核心下沉到 `SOZO-Common`；C3 移除对 S3 `lib` 的编译依赖。
-2. 将当前 `LightingController` 拆为纯 `LightingRenderer` 与 `LedOutput`。颜色计算和效果不能包含 `Adafruit_NeoPixel`、`Arduino.h` 或默认 GPIO 驱动。
+2. 保持 `LightingController` 只接受完整节点状态并驱动 `LightingRenderer` 与 `LedOutput`；它不得接收 `ControlCommand` 或承担场景权威与持久化。颜色计算和效果不能包含具体灯带驱动、`Arduino.h` 或默认 GPIO 驱动。
 3. 建立 `LedGeometry`，明确物理 62 / 逻辑 60 的模型；C3 输出适配器每帧清黑未映射物理灯珠。
 4. 删除 `BleLedRenderGuard` 以及“BLE 发送后暂停渲染”的逻辑。通讯与灯带刷新不能用时间阻断相互规避。
 5. 将 C3 `main.cpp` 中的绑定、收包分发、心跳和渲染调度移入节点应用模块；`main.cpp` 只创建模块和调用入口。
@@ -213,7 +214,7 @@ GPIO / 传感器 Adapter → NodeInputEvent → Node Application
 每次改动必须通过以下检查：
 
 - 核心模块的宿主机测试不需要真实 ESP32、BLE 或 LED 库。
-- `SozoLightingCore` 中不得出现 `NimBLE`、`WiFi`、`Preferences`、`Adafruit_NeoPixel`、`FastLED` 或 GPIO 调用。
+- `SozoLightingCore` 中不得出现 `NimBLE`、`WiFi`、`Preferences`、具体灯带驱动或 GPIO 调用。
 - `SozoNodeProtocol` 中不得出现具体传输和硬件库。
 - C3 编译配置不得引用 `../SOZO-ESP32-n8r8/lib`。
 - 每个 LED 输出适配器有测试证明：所有物理灯珠都会收到写入；未映射物理灯珠为黑；一次呈现只调用一次底层 `show()`。
@@ -231,4 +232,4 @@ GPIO / 传感器 Adapter → NodeInputEvent → Node Application
 5. 仅在组合根中注册适配器。
 6. 做端到端验收：断连、重连、重复消息、过期版本、零亮度和物理尾部灯珠。
 
-这套顺序保证未来增加能力时，改动局部集中、可验证，也不会重新把主灯带、C3 灯带和通信逻辑绑在一起。
+这套顺序保证未来增加能力时，改动局部集中、可验证，也不会重新把 S3 本地灯光节点、C3 远程灯光节点和通信逻辑绑在一起。

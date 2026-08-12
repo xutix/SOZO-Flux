@@ -1,20 +1,10 @@
 #pragma once
 
-#include <SozoDomain.h>
-#include <SozoNodeProtocol.h>
+#include <LightNodeRuntime.h>
 
 namespace sozo::c3 {
 
-struct NodeControlState {
-  static constexpr uint32_t kSchemaVersion = 1U;
-
-  uint32_t schemaVersion{kSchemaVersion};
-  node::NodeControlMode controlMode{node::NodeControlMode::FollowMain};
-  PersistedLightingState independentState{};
-  int16_t independentManualLitPixelCount{-1};
-  uint32_t independentRevision{0};
-  bool hasIndependentScene{false};
-};
+using NodeControlState = LightNodeControlState;
 
 class NodeControlRepository {
  public:

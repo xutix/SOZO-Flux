@@ -1,4 +1,5 @@
 #include <C3NodeApplication.h>
+#include <SozoVersion.h>
 
 namespace sozo::c3 {
 namespace {
@@ -28,7 +29,7 @@ C3NodeApplication::C3NodeApplication(
     NodeDiagnosticsPort &diagnostics, PairingWindow &pairingWindow,
     NodeTransportPort &transport, NodeBindingRepository &bindings,
     NodeControlRepository &controls, NodeLedCountRepository &ledCounts,
-    const C3NodeProfile profile)
+    const C3NodeProfile profile, NodeFirmwareReceiver *firmwareReceiver)
     : lighting_(lighting),
       button_(button),
       diagnostics_(diagnostics),
@@ -37,6 +38,7 @@ C3NodeApplication::C3NodeApplication(
       bindings_(bindings),
       controls_(controls),
       ledCounts_(ledCounts),
+      firmwareReceiver_(firmwareReceiver),
       profile_(profile),
       sceneRuntime_(lighting) {}
 
@@ -54,9 +56,13 @@ bool C3NodeApplication::begin(const node::NodeId nodeId,
   if (ledCountState_.schemaVersion != NodeLedCountState::kSchemaVersion ||
       ledCountState_.ledCount == 0U ||
       ledCountState_.ledCount > profile_.maxLedCount) {
+    ledCountState_ = NodeLedCountState{};
     ledCountState_.ledCount = profile_.defaultLedCount;
+    ledCountState_.centerIndex =
+        static_cast<uint16_t>((profile_.defaultLedCount - 1U) / 2U);
+    ledCountState_.centerCount = profile_.defaultLedCount;
   }
-  lighting_.begin(makeLocalState(ledCountState_.ledCount));
+  lighting_.begin(makeLocalState(ledCountState_));
   sceneRuntime_.restoreControlState(controls_.load());
   binding_ = bindings_.load();
   if (!transport_.begin(nodeId_, makeCapabilities(), binding_.bound,
@@ -74,7 +80,10 @@ C3NodeEvent C3NodeApplication::tick(const uint32_t nowMs) {
   if (!initialized_) return C3NodeEvent::None;
 
   const bool connected = transport_.connected();
-  if (transportConnected_ && !connected) sceneRuntime_.onDisconnected();
+  if (transportConnected_ && !connected) {
+    sceneRuntime_.onDisconnected();
+    if (firmwareReceiver_ != nullptr) firmwareReceiver_->onDisconnected();
+  }
   transportConnected_ = connected;
 
   const PairingEvent pairingEvent = pairingWindow_.tick(button_.pressed(), nowMs);
@@ -89,6 +98,12 @@ C3NodeEvent C3NodeApplication::tick(const uint32_t nowMs) {
 
   node::Envelope inbound{};
   while (transport_.popInbound(inbound)) handleInbound(inbound, nowMs);
+  if (firmwareReceiver_ != nullptr) {
+    firmwareReceiver_->tick(nowMs);
+    if (firmwareReceiver_->restartRequested()) {
+      return C3NodeEvent::FirmwareRestartRequested;
+    }
+  }
   sceneRuntime_.tick(nowMs);
 
   if (pairingEvent == PairingEvent::Opened) return C3NodeEvent::PairingOpened;
@@ -104,30 +119,38 @@ uint32_t C3NodeApplication::lastAppliedSceneRevision() const {
   return sceneRuntime_.lastAppliedSceneRevision();
 }
 
+spatial_light::SpatialLayout C3NodeApplication::makeSpatialLayout(
+    const NodeLedCountState &layout) const {
+  return {static_cast<spatial_light::LayoutProfile>(layout.layoutProfile),
+          layout.ledCount,
+          layout.centerIndex,
+          layout.leftCount,
+          layout.centerCount,
+          layout.rightCount,
+          layout.reversed};
+}
+
 PersistedLightingState C3NodeApplication::makeLocalState(
-    const uint16_t ledCount) const {
+    const NodeLedCountState &layout) const {
   PersistedLightingState state = makeDefaultPersistedLightingState();
-  state.layout.profile = spatial_light::LayoutProfile::Continuous;
-  state.layout.activeCount = ledCount;
-  state.layout.centerIndex =
-      static_cast<uint16_t>((ledCount - 1U) / 2U);
-  state.layout.leftCount = 0;
-  state.layout.centerCount = ledCount;
-  state.layout.rightCount = 0;
-  state.layout.reversed = false;
+  state.layout = makeSpatialLayout(layout);
   return state;
 }
 
 node::CapabilitiesPayload C3NodeApplication::makeCapabilities() const {
   node::CapabilitiesPayload capabilities{};
   capabilities.capabilityBits = node::capabilityMask(node::Capability::LightOutput);
+  if (firmwareReceiver_ != nullptr) {
+    capabilities.capabilityBits |=
+        node::capabilityMask(node::Capability::FirmwareUpdate);
+  }
   capabilities.maxLedCount = profile_.maxLedCount;
   capabilities.maxPacketBytes = node::kMaxPacketBytes;
   capabilities.protocolMin = node::kProtocolVersion;
   capabilities.protocolMax = node::kProtocolVersion;
-  capabilities.firmwareMajor = 0;
-  capabilities.firmwareMinor = 1;
-  capabilities.firmwarePatch = 0;
+  capabilities.firmwareMajor = version::kNodeC3Major;
+  capabilities.firmwareMinor = version::kNodeC3Minor;
+  capabilities.firmwarePatch = version::kNodeC3Patch;
   capabilities.controlMode = sceneRuntime_.controlMode();
   capabilities.hardwareProfile = profile_.hardwareProfile;
   capabilities.bound = binding_.bound;
@@ -136,6 +159,33 @@ node::CapabilitiesPayload C3NodeApplication::makeCapabilities() const {
 
 void C3NodeApplication::handleInbound(const node::Envelope &envelope,
                                       const uint32_t nowMs) {
+  if (firmwareReceiver_ != nullptr) {
+    if (envelope.messageType == node::MessageType::FirmwareBegin) {
+      node::FirmwareBeginPayload payload{};
+      if (node::readFirmwareBegin(envelope, payload) == node::CodecResult::Ok) {
+        firmwareReceiver_->begin(payload, nowMs);
+      }
+      sendFirmwareStatus(envelope, nowMs);
+      return;
+    }
+    if (envelope.messageType == node::MessageType::FirmwareChunk) {
+      node::FirmwareChunkPayload payload{};
+      if (node::readFirmwareChunk(envelope, payload) == node::CodecResult::Ok) {
+        firmwareReceiver_->append(payload, nowMs);
+      }
+      sendFirmwareStatus(envelope, nowMs);
+      return;
+    }
+    if (envelope.messageType == node::MessageType::FirmwareEnd) {
+      if (node::readFirmwareEnd(envelope) == node::CodecResult::Ok) {
+        firmwareReceiver_->finish(nowMs);
+      }
+      sendFirmwareStatus(envelope, nowMs);
+      return;
+    }
+    if (firmwareReceiver_->active()) return;
+  }
+
   switch (envelope.messageType) {
     case node::MessageType::BindRequest:
       handleBindRequest(envelope, nowMs);
@@ -147,7 +197,7 @@ void C3NodeApplication::handleInbound(const node::Envelope &envelope,
           envelope.channelId ==
                   static_cast<uint16_t>(node::TopicId::NodeIndependentScene)
               ? SceneTarget::Independent
-              : SceneTarget::FollowMain;
+              : SceneTarget::FollowSpace;
       if (envelope.channelId == static_cast<uint16_t>(node::TopicId::SpaceScene) ||
           target == SceneTarget::Independent) {
         if (node::readSceneSnapshot(envelope, scene) == node::CodecResult::Ok) {
@@ -188,13 +238,46 @@ void C3NodeApplication::handleInbound(const node::Envelope &envelope,
       uint16_t errorCode = accepted ? 0U : 6U;
       if (accepted) {
         const NodeLedCountState previous = ledCountState_;
-        const NodeLedCountState next{NodeLedCountState::kSchemaVersion,
-                                     payload.ledCount};
+        NodeLedCountState next{};
+        next.ledCount = payload.ledCount;
+        next.centerIndex = static_cast<uint16_t>((payload.ledCount - 1U) / 2U);
+        next.centerCount = payload.ledCount;
         if (!sceneRuntime_.setLocalLedCount(next.ledCount)) {
           accepted = false;
           errorCode = 6U;
         } else if (!ledCounts_.save(next)) {
           sceneRuntime_.setLocalLedCount(previous.ledCount);
+          accepted = false;
+          errorCode = 7U;
+        } else {
+          ledCountState_ = next;
+        }
+      }
+      sendCommandReceipt(envelope, accepted, errorCode, nowMs);
+      break;
+    }
+    case node::MessageType::LedGeometryRequest: {
+      node::LedGeometryPayload payload{};
+      bool accepted =
+          node::readLedGeometryRequest(envelope, payload) ==
+              node::CodecResult::Ok &&
+          payload.activeCount <= profile_.maxLedCount;
+      uint16_t errorCode = accepted ? 0U : 6U;
+      if (accepted) {
+        const NodeLedCountState previous = ledCountState_;
+        NodeLedCountState next{};
+        next.ledCount = payload.activeCount;
+        next.layoutProfile = payload.layoutProfile;
+        next.centerIndex = payload.centerIndex;
+        next.leftCount = payload.leftCount;
+        next.centerCount = payload.centerCount;
+        next.rightCount = payload.rightCount;
+        next.reversed = (payload.spatialFlags & node::kSpatialFlagReversed) != 0U;
+        if (!sceneRuntime_.setLocalLayout(makeSpatialLayout(next))) {
+          accepted = false;
+          errorCode = 6U;
+        } else if (!ledCounts_.save(next)) {
+          sceneRuntime_.setLocalLayout(makeSpatialLayout(previous));
           accepted = false;
           errorCode = 7U;
         } else {
@@ -331,6 +414,12 @@ void C3NodeApplication::sendStatusSnapshot(const node::Envelope &request,
   status.controlMode = sceneRuntime_.controlMode();
   status.pairingWindowOpen = pairingWindow_.isOpen();
   status.ledCount = ledCountState_.ledCount;
+  status.layoutProfile = ledCountState_.layoutProfile;
+  status.centerIndex = ledCountState_.centerIndex;
+  status.leftCount = ledCountState_.leftCount;
+  status.centerCount = ledCountState_.centerCount;
+  status.rightCount = ledCountState_.rightCount;
+  status.spatialFlags = ledCountState_.reversed ? node::kSpatialFlagReversed : 0U;
 
   node::Envelope response{};
   response.channelId = request.channelId;
@@ -341,6 +430,22 @@ void C3NodeApplication::sendStatusSnapshot(const node::Envelope &request,
   response.correlationId = request.correlationId;
   node::writeStatusSnapshot(response, status);
   transport_.send(response);
+}
+
+void C3NodeApplication::sendFirmwareStatus(const node::Envelope &request,
+                                           const uint32_t nowMs) {
+  if (firmwareReceiver_ == nullptr) return;
+  node::Envelope response{};
+  response.channelId = static_cast<uint16_t>(node::TopicId::NodeState);
+  response.sourceNodeId = nodeId_;
+  response.targetNodeId = request.sourceNodeId;
+  response.sequence = outboundSequence_++;
+  response.timestampMs = nowMs;
+  response.correlationId = request.correlationId;
+  if (node::writeFirmwareStatus(response, firmwareReceiver_->status()) ==
+      node::CodecResult::Ok) {
+    transport_.send(response);
+  }
 }
 
 }  // namespace sozo::c3

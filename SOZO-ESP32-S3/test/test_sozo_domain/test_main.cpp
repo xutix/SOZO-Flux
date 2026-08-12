@@ -35,7 +35,7 @@ static_assert(defaultState.primaryColor.red == 255 &&
                   defaultState.primaryColor.green == 120 &&
                   defaultState.primaryColor.blue == 0,
               "the persisted state must preserve the current default color");
-static_assert(defaultState.layout.activeCount == 308,
+static_assert(defaultState.layout.activeCount == 144,
               "the persisted state must preserve the installed LED count");
 static_assert(isParameterCommandWellFormed(
                   kControlProtocolVersion, ControlSource::Web,

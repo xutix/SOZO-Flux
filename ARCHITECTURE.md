@@ -17,26 +17,27 @@ Transport Adapter (Web / Serial / BLE / future Wi-Fi, ESP-NOW, Voice)
 ControlCommand + source + protocol version
         |
         v
-CommandRouter ---- validation / authorization / delayed persistence
+Scene / Target Command ---- validation / delayed persistence
         |
         v
-Authoritative Lighting State
-        |
-        +----> Shared Lighting Core ----> Hardware Output Adapter
-        |
-        +----> Node Coordinator --------> Flux Node Bus --------> Extension Node
+Named Scene Assignments ----> Per-node Desired Lighting State
+        |                                  |
+        +----> Local Light Runtime --------+----> Shared Lighting Core ----> S3 Output
+                                           |
+                                           +----> Flux Node Bus ----> C3 Runtime
 ```
 
-任何传输适配器都不得直接修改 LED、NVS 或设备私有状态。场景和状态在协调器中保持权威，
-扩展节点只执行其能力允许的命令并报告事实。
+任何传输适配器都不得直接修改 LED、NVS 或设备私有状态。每条灯带拥有自己的最终目标状态；
+场景激活只更新场景列出的节点，未列出的节点保持上一次状态，直接控制只更新一个节点。
 
 ## 当前模块边界
 
 | 边界 | 当前目录 | 职责 |
 |---|---|---|
-| Gateway firmware | `SOZO-ESP32-S3` | 组合根、网页/串口入口、Wi-Fi、音频、主灯输出、节点协调 |
+| Hub firmware | `SOZO-ESP32-S3` | 组合根、网页/串口入口、Wi-Fi、音频、节点协调、可选本地灯光节点 |
 | Node firmware | `SOZO-ESP32-C3` | BLE 外设、绑定、节点私有配置、本地灯带输出 |
 | Domain core | `SOZO-Common/lib/SozoDomain` | 状态、命令、来源、参数约束 |
+| Scene core | `SOZO-Common/lib/SozoSceneCore` | 命名场景、逐节点目标状态、投递状态与灯光节点运行时 |
 | Lighting core | `SOZO-Common/lib/SozoLightingCore` | 灯效、帧、几何映射与输出端口 |
 | Protocol | `SOZO-Common/lib/SozoNodeProtocol` | 二进制封装、消息与 CRC |
 | Bus | `SOZO-Common/lib/SozoBusCore` | 发布订阅和异步请求/响应 |
@@ -65,9 +66,13 @@ examples/            <- 独立、可构建的接入示例
 
 ## 稳定边界
 
+- 本仓库是正式 S3/C3 固件的唯一构建来源；仓库外硬件相同的工程副本不是可替换实现。
+- 产品身份、`sozo-flux` mDNS/OTA 主机名、`SOZO-FLUX-SETUP` 配网热点和
+  `SOZO-FLUX-C3-` BLE 前缀是受保护的部署兼容性边界，详见
+  [项目身份与烧录保护](docs/PROJECT-GUARDRAILS.md)。
 - `sozo` C++ 命名空间和 `SOZO_*` 编译宏是内部技术标识，本次品牌重命名不强制破坏它们。
 - S3 的 `sozo-light` NVS 命名空间保持不变，以兼容已经部署的配置。
-- BLE UUID、协议 magic 与 protocol v1 保持不变；显示名称可以升级为 SOZO Flux。
+- BLE UUID 与协议 magic 保持不变；完整节点布局从 protocol v2 起传输。
 - 协议版本独立于平台和固件版本，兼容性规则见 `docs/VERSIONING.md`。
 
 ## 下一组架构能力
