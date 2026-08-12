@@ -4,8 +4,10 @@
 
 namespace sozo {
 
-SerialConsole::SerialConsole(Stream &stream, CommandRouter &router)
-    : stream_(stream), router_(router), inputBuffer_{}, inputLength_(0), lastInputAt_(0) {}
+SerialConsole::SerialConsole(Stream &stream,
+                             LightingControlApplication &lighting)
+    : stream_(stream), lighting_(lighting), inputBuffer_{}, inputLength_(0),
+      lastInputAt_(0) {}
 
 void SerialConsole::begin() { printHelp(); }
 
@@ -71,7 +73,7 @@ void SerialConsole::processBufferedNumber() {
         {0, 0, 0},
         makeDefaultSpatialLayout(),
     };
-    if (router_.dispatch(command).accepted()) {
+    if (lighting_.dispatch(command, millis()).accepted()) {
       stream_.printf(
           "[SERIAL] Space pixel intent: %d (each node clamps locally).\n",
           requestedCount);
@@ -84,7 +86,7 @@ void SerialConsole::processBufferedNumber() {
 }
 
 void SerialConsole::printStatus() {
-  const StateSnapshot state = router_.snapshot();
+  const LightingApplicationSnapshot state = lighting_.snapshot();
   stream_.printf("[LOCAL NODE] Active: %u/%u\n",
                  state.lighting.layout.activeCount,
                  spatial_light::kMaxLedCount);

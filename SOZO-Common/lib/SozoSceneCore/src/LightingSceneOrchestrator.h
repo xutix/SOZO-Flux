@@ -3,13 +3,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <SpaceSceneCoordinator.h>
-#include <SozoNodeProtocol.h>
+#include <LightingScene.h>
 
 namespace sozo {
 
 using LightingSceneId = uint32_t;
-using LightingTargetId = node::NodeId;
+using LightingTargetId = uint32_t;
 
 constexpr LightingTargetId kLocalLightingTargetId = 0xFFFFFFFEU;
 constexpr LightingSceneId kDirectLightControlSource = 0U;

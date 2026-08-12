@@ -9,7 +9,7 @@ test('release manifest separates platform, firmware, node, and protocol versions
   assert.match(manifest, /^platform=0\.1\.0-alpha$/m);
   assert.match(manifest, /^gateway_s3=0\.1\.0-alpha$/m);
   assert.match(manifest, /^node_c3=0\.2\.1-alpha$/m);
-  assert.match(manifest, /^protocol=1$/m);
+  assert.match(manifest, /^protocol=2$/m);
 
   const versionHeader = await read(
     'SOZO-Common/lib/SozoVersion/src/SozoVersion.h',
@@ -21,7 +21,7 @@ test('release manifest separates platform, firmware, node, and protocol versions
   const protocolHeader = await read(
     'SOZO-Common/lib/SozoNodeProtocol/src/SozoNodeProtocol.h',
   );
-  assert.match(protocolHeader, /kProtocolVersion = 1/);
+  assert.match(protocolHeader, /kProtocolVersion = 2/);
 });
 
 test('public device surfaces use the SOZO Flux identity', async () => {

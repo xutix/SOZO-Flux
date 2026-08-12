@@ -5,11 +5,10 @@
 
 #include <AudioAnalyzer.h>
 #include <BleFleetAdapter.h>
-#include <CommandRouter.h>
+#include <LightingControlApplication.h>
 #include <LightNodeRuntime.h>
 #include <LightingController.h>
 #include <LightingControllerNodeSink.h>
-#include <LightingSceneOrchestrator.h>
 #include <LightingSceneStore.h>
 #include <NetworkManager.h>
 #include <NodeNameStore.h>
@@ -17,8 +16,8 @@
 #include <SceneDeliveryCoordinator.h>
 #include <SerialConsole.h>
 #include <SettingsStore.h>
+#include <WiFiCredentialStore.h>
 #include <S3LightingOutput.h>
-#include <SpaceSceneCoordinator.h>
 #include <SozoDomain.h>
 #include <SozoVersion.h>
 #include <WebApi.h>
@@ -43,11 +42,12 @@ constexpr uint8_t kStatusLedBrightness = 60;
 constexpr uint32_t kSerialReportIntervalMs = 500;
 
 sozo::SettingsStore settingsStore;
+sozo::WiFiCredentialStore wifiCredentialStore;
 sozo::NodeNameStore nodeNameStore;
 sozo::LightingSceneStore lightingSceneStore;
-sozo::LightingSceneOrchestrator lightingScenes;
-sozo::NetworkManager networkManager(settingsStore);
-sozo::SpaceSceneCoordinator sceneCoordinator;
+sozo::NetworkManager networkManager(wifiCredentialStore);
+sozo::LightingControlApplication lightingControl(settingsStore,
+                                                 lightingSceneStore);
 #if SOZO_LOCAL_LIGHT_ENABLED
 sozo::s3::S3LightingOutput lightingOutput(spatial_light::kMaxLedCount,
                                           kLedPin);
@@ -62,7 +62,7 @@ class LocalLightingTargetAdapter final : public sozo::LocalLightingTarget {
   bool available() const override { return true; }
   bool apply(const sozo::LightingScene &scene, const uint32_t revision,
              const uint32_t nowMs) override {
-    runtime_.setControlMode(sozo::node::NodeControlMode::Independent);
+    runtime_.setControlMode(sozo::LightControlMode::Independent);
     const sozo::LightSceneApplyResult result = runtime_.applyScene(
         scene, revision, nowMs, nowMs, sozo::LightSceneTarget::Independent);
     return result == sozo::LightSceneApplyResult::Applied ||
@@ -86,25 +86,22 @@ class LocalLightingTargetAdapter final : public sozo::LocalLightingTarget {
 LocalLightingTargetAdapter localLightingTarget;
 #endif
 sozo::AudioAnalyzer audioAnalyzer;
-sozo::CommandRouter commandRouter(sceneCoordinator, settingsStore);
 sozo::BleFleetAdapter bleNodeTransport;
 sozo::NodeFleetCoordinator nodeCoordinator(bleNodeTransport);
-sozo::SceneDeliveryCoordinator sceneDelivery(lightingScenes,
+sozo::SceneDeliveryCoordinator sceneDelivery(lightingControl,
                                               localLightingTarget,
                                               nodeCoordinator);
-sozo::SerialConsole serialConsole(Serial, commandRouter);
+sozo::SerialConsole serialConsole(Serial, lightingControl);
 Adafruit_NeoPixel statusLed(kStatusLedCount, kStatusLedPin,
                             NEO_GRB + NEO_KHZ800);
 
 void restartDevice();
-sozo::WebApi webApi(commandRouter, networkManager, audioAnalyzer,
-                    nodeCoordinator, nodeNameStore, lightingScenes,
-                    lightingSceneStore,
+sozo::WebApi webApi(lightingControl, networkManager, audioAnalyzer,
+                    nodeCoordinator, nodeNameStore,
                     buildSpatialLightPage, restartDevice);
 
 uint32_t lastSerialReport = 0;
 uint32_t lastLocalLightConfigRevision = 0U;
-uint32_t lastLegacySceneRevision = 0U;
 bool otaAvailable = false;
 uint8_t lastOtaProgressPercent = 255;
 
@@ -191,50 +188,23 @@ void initStatusLed() {
 
 void initLocalLightNode() {
 #if SOZO_LOCAL_LIGHT_ENABLED
-  const sozo::PersistedLightingState state = sceneCoordinator.lightingState();
-  const sozo::SpaceSceneSnapshot &scene = sceneCoordinator.snapshot();
-  const uint32_t now = millis();
+  const sozo::PersistedLightingState state = lightingControl.snapshot().lighting;
   localLightNode.begin(state);
-  localLightNode.setControlMode(sozo::node::NodeControlMode::Independent);
+  localLightNode.setControlMode(sozo::LightControlMode::Independent);
   lastLocalLightConfigRevision =
-      sceneCoordinator.localLightConfiguration().revision;
+      lightingControl.localLightConfiguration().revision;
 #endif
 }
 
 void loadConfiguration() {
   const sozo::PersistedLightingState state = settingsStore.loadLightingState();
-  sceneCoordinator.begin(state);
+  lightingControl.begin(state, SOZO_LOCAL_LIGHT_ENABLED != 0);
   audioAnalyzer.setTuning(state.audio);
-  lastLegacySceneRevision = sceneCoordinator.snapshot().revision;
-  if (!lightingSceneStore.load(lightingScenes)) {
-#if SOZO_LOCAL_LIGHT_ENABLED
-    sozo::NamedLightingScene defaultScene{};
-    defaultScene.id = 1U;
-    defaultScene.setName("默认空间");
-    defaultScene.assignments[0] = {sozo::kLocalLightingTargetId,
-                                   sceneCoordinator.snapshot().lighting};
-    defaultScene.assignmentCount = 1U;
-    lightingScenes.saveScene(defaultScene);
-    lightingScenes.activateScene(defaultScene.id);
-    lightingSceneStore.save(lightingScenes);
-#endif
-  } else if (
-#if SOZO_LOCAL_LIGHT_ENABLED
-      lightingScenes.desiredFor(sozo::kLocalLightingTargetId) == nullptr
-#else
-      false
-#endif
-  ) {
-    lightingScenes.applyDirect(sozo::kLocalLightingTargetId,
-                               sceneCoordinator.snapshot().lighting);
-    lightingSceneStore.save(lightingScenes);
-  }
 }
 
 void saveConfigurationIfReady() {
   const uint32_t now = millis();
-  commandRouter.tick(now);
-  lightingSceneStore.tick(now, lightingScenes);
+  lightingControl.tick(now);
 }
 
 void printSystemInfo() {
@@ -264,7 +234,7 @@ void printSystemInfo() {
 #if SOZO_LOCAL_LIGHT_ENABLED
   Serial.printf("Local light node: GPIO%u, active=%u, maximum=%u pixels\n",
                 kLedPin,
-                sceneCoordinator.localLightConfiguration().layout.activeCount,
+                lightingControl.localLightConfiguration().layout.activeCount,
                 spatial_light::kMaxLedCount);
 #else
   Serial.println(F("Local light node: NOT INSTALLED"));
@@ -294,7 +264,7 @@ void printDeviceStatus() {
   const sozo::AudioTuning &tuning = audioAnalyzer.tuning();
   const sozo::NetworkStatus &network = networkManager.status();
   const sozo::PersistedLightingState lighting =
-      sceneCoordinator.lightingState();
+      lightingControl.snapshot().lighting;
   Serial.println();
   Serial.println(F("---------------- DEVICE STATUS ----------------"));
   Serial.printf("[Wi-Fi] State: %s | Mode: %s | SSID: %s | IP: %s",
@@ -348,7 +318,7 @@ void printRuntimeStatus() {
   if (now - lastSerialReport < kSerialReportIntervalMs) return;
   lastSerialReport = now;
   const sozo::AudioSnapshot &audio = audioAnalyzer.snapshot();
-  const sozo::SpaceSceneSnapshot &scene = sceneCoordinator.snapshot();
+  const sozo::LightingApplicationSnapshot scene = lightingControl.snapshot();
   Serial.printf(
       "[LIVE] MIC=%s Frames=%lu | Mode=%s | Volume=%.1f | Beat=%.1f | "
       "RMS=%.1f | Brightness=%u | FreeHeap=%lu bytes\n",
@@ -368,7 +338,7 @@ void setup() {
 
   loadConfiguration();
   Serial.printf("[BOOT] Loaded saved mode: %s\n",
-                modeName(sceneCoordinator.snapshot().lighting.mode));
+                modeName(lightingControl.snapshot().lighting.mode));
   initStatusLed();
   Serial.println(F("[BOOT] Onboard GPIO48 WS2812 disabled."));
   initLocalLightNode();
@@ -376,8 +346,8 @@ void setup() {
   Serial.printf("[BOOT] Local light node initialized: GPIO%u, %u pixels, "
                 "brightness %u.\n",
                 kLedPin,
-                sceneCoordinator.localLightConfiguration().layout.activeCount,
-                sceneCoordinator.snapshot().lighting.brightness);
+                lightingControl.localLightConfiguration().layout.activeCount,
+                lightingControl.snapshot().lighting.brightness);
 #else
   Serial.println(F("[BOOT] Local light node not installed."));
 #endif
@@ -406,28 +376,20 @@ void loop() {
   saveConfigurationIfReady();
   audioAnalyzer.tick();
   const sozo::AudioFrame &audio = audioAnalyzer.snapshot().frame;
-  const sozo::SpaceSceneSnapshot &scene = sceneCoordinator.snapshot();
-#if SOZO_LOCAL_LIGHT_ENABLED
-  if (scene.revision != lastLegacySceneRevision) {
-    lightingScenes.applyDirect(sozo::kLocalLightingTargetId, scene.lighting);
-    lightingSceneStore.markDirty(now);
-    lastLegacySceneRevision = scene.revision;
-  }
-#endif
 #if SOZO_LOCAL_LIGHT_ENABLED
   const sozo::LocalLightConfiguration &configuration =
-      sceneCoordinator.localLightConfiguration();
+      lightingControl.localLightConfiguration();
   if (configuration.revision != lastLocalLightConfigRevision) {
     localLightNode.updateLocalConfiguration(
-        configuration, sceneCoordinator.lightingState().audio);
+        configuration, lightingControl.snapshot().lighting.audio);
     lastLocalLightConfigRevision = configuration.revision;
   }
-  nodeCoordinator.tick(now, scene, audio);
+  nodeCoordinator.tick(now, audio);
   sceneDelivery.tick(now);
   localLightNode.applyAudioFrame(audio, audio.framesRead);
   localLightNode.tick(now);
 #else
-  nodeCoordinator.tick(now, scene, audio);
+  nodeCoordinator.tick(now, audio);
   sceneDelivery.tick(now);
 #endif
   networkManager.tick();

@@ -1,5 +1,9 @@
 # SOZO Flux 项目指令
 
+任何 agent 修改灯光、网页、节点控制或持久化前，还必须完整阅读
+`docs/LIGHTING-ARCHITECTURE.md`，并在完成后运行
+`tools/verify-module-dependencies.ps1`。不得恢复文档中列出的旧双控制链。
+
 ## 受保护的项目身份
 
 - 本仓库根目录是 SOZO Flux 固件唯一允许的构建与烧录来源。

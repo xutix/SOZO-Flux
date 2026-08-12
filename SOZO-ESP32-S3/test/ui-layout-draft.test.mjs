@@ -180,7 +180,7 @@ function loadPageUi(serverStatus, nodeResponse = { ok: true, nodes: [] },
   const fetchCalls = [];
   const script = match[1].replace(
     'loadStatus();setInterval(()=>loadStatus(false),5000);',
-    'globalThis.__ui={setLayoutProfile,saveLayout,selectControlTarget,loadStatus,loadNodes,loadScenes,openNodePairing,activateView,saveNodeName,getLayoutProfile:()=>layoutProfile,getActiveView:()=>activeView,setState:value=>state=value,setNodeState:value=>nodeState=value,setSelected:value=>selected=value,setSceneState:value=>sceneState=value,setSelectedControlTarget:value=>selectedControlTarget=value,setSelectedSceneTarget:value=>selectedSceneTarget=value,getSelectedSceneTarget:()=>selectedSceneTarget,setSceneMemberSelected,sceneMemberIds,lightingForControlTarget,getState:()=>state,getFetchCalls:()=>fetchCalls,getSelectedNodeId:()=>selectedNodeId,getSelectedRemoteNode:selectedRemoteNode,getScopeValue:()=>document.getElementById(\'scopeValue\').textContent,getDraftValue:(nodeId,field=\'name\')=>formDrafts.read(nodeFieldKey(nodeId,field),undefined),renderEffects,chooseEffect,renderParameters,renderLightNodes,renderLightNodeControl,renderSpaceStatus,colorControl,extensionColorControl,getParameterClass:typeof parameterLayoutClass===\'function\'?parameterLayoutClass:null,getParameterPlan:typeof parameterPlan===\'function\'?parameterPlan:null,getParameterGridClass:typeof parameterGridClass===\'function\'?parameterGridClass:null,getParameterColumns:typeof parameterColumns===\'function\'?parameterColumns:null,getParameterGridItems:typeof parameterGridItems===\'function\'?parameterGridItems:null};',
+    'globalThis.__ui={setLayoutProfile,saveLayout,selectControlTarget,loadStatus,loadNodes,loadScenes,openNodePairing,activateView,saveNodeName,getLayoutProfile:()=>layoutProfile,getActiveView:()=>activeView,setState:value=>state=value,setNodeState:value=>nodeState=value,setSelected:value=>selected=value,setSceneState:value=>sceneState=value,setSelectedControlTarget:value=>sceneEditorState.controlTarget=value,setSelectedSceneTarget:value=>sceneEditorState.sceneTarget=value,getSelectedSceneTarget:()=>sceneEditorState.sceneTarget,setSceneMemberSelected,sceneMemberIds,lightingForControlTarget,getState:()=>state,getFetchCalls:()=>fetchCalls,getSelectedNodeId:()=>selectedNodeId,getSelectedRemoteNode:selectedRemoteNode,getScopeValue:()=>document.getElementById(\'scopeValue\').textContent,getDraftValue:(nodeId,field=\'name\')=>formDrafts.read(nodeFieldKey(nodeId,field),undefined),renderEffects,chooseEffect,renderParameters,renderLightNodes,renderLightNodeControl,renderSpaceStatus,colorControl,createColorChooser,getParameterClass:typeof parameterLayoutClass===\'function\'?parameterLayoutClass:null,getParameterPlan:typeof parameterPlan===\'function\'?parameterPlan:null,getParameterGridClass:typeof parameterGridClass===\'function\'?parameterGridClass:null,getParameterColumns:typeof parameterColumns===\'function\'?parameterColumns:null,getParameterGridItems:typeof parameterGridItems===\'function\'?parameterGridItems:null};',
   );
   const sandbox = {
     URLSearchParams,
@@ -365,7 +365,12 @@ test('direct-target preset click preserves RGB channel meaning', async () => {
 test('independent C3 preset click keeps pure blue and changes only the scene draft', () => {
   const { ui } = loadPageUi(statusWith('continuous'));
   const draft = { settings: { color: '#FF5266' } };
-  const control = ui.extensionColorControl(['color', 'Primary', 'color', true], draft, 'node-51930b93-color');
+  const control = ui.createColorChooser(
+    draft.settings.color,
+    'Primary',
+    'scene-node-51930b93-color',
+    next => { draft.settings.color = next; },
+  );
   const blue = findElement(control, item => item.value === '#0000FF');
   blue.onclick();
 

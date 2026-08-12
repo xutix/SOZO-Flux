@@ -224,11 +224,11 @@ board_build.psram_type = opi
 
 ## Extensible control architecture
 
-The firmware has one authoritative space scene and one command path. A
-transport adapter must create a `ControlCommand` and send it to
-`CommandRouter`; adapters must not write LED state or NVS directly. The S3
-strip is an optional local light node and consumes the same scene contract as
-a remote C3 node.
+The firmware has one authoritative desired-lighting state and one application
+entry. Transport adapters send validated intents to
+`LightingControlApplication`; adapters must not write LED state or NVS
+directly. The S3 strip is an optional local light node and consumes the same
+`LightingScene` contract as a remote C3 node.
 
 | Responsibility | Module |
 |---|---|
@@ -237,7 +237,7 @@ a remote C3 node.
 | Shared LED effects and spatial rendering | `../SOZO-Common/lib/SozoLightingCore` |
 | Optional S3 local-node NeoPixel output | `lib/SozoLightingAdapter` |
 | Microphone sampling and audio frame analysis | `lib/SozoAudio` |
-| Command authorization and delayed persistence | `lib/SozoControl` |
+| Lighting use cases, validation and persistence ports | `lib/SozoControl` |
 | Router Wi-Fi, mDNS and provisioning AP | `lib/SozoNetwork` |
 | Phone/computer HTTP interface | `lib/SozoWeb` |
 | USB serial interface | `lib/SozoSerial` |

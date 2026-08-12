@@ -3,9 +3,9 @@
 namespace sozo {
 
 SceneDeliveryCoordinator::SceneDeliveryCoordinator(
-    LightingSceneOrchestrator &scenes, LocalLightingTarget &localTarget,
+    LightingControlApplication &lighting, LocalLightingTarget &localTarget,
     NodeFleetCoordinator &nodes)
-    : scenes_(scenes), localTarget_(localTarget), nodes_(nodes) {}
+    : lighting_(lighting), localTarget_(localTarget), nodes_(nodes) {}
 
 void SceneDeliveryCoordinator::tick(const uint32_t nowMs) {
   deliverLocal(nowMs);
@@ -29,12 +29,12 @@ SceneDeliveryCoordinator::Attempt *SceneDeliveryCoordinator::attemptFor(
 
 void SceneDeliveryCoordinator::deliverLocal(const uint32_t nowMs) {
   const DesiredLightingState *desired =
-      scenes_.desiredFor(kLocalLightingTargetId);
+      lighting_.desiredFor(kLocalLightingTargetId);
   if (desired == nullptr || !desired->pending() || !localTarget_.available()) {
     return;
   }
   if (localTarget_.apply(desired->scene, desired->revision, nowMs)) {
-    scenes_.markDelivered(kLocalLightingTargetId, desired->revision);
+    lighting_.markDelivered(kLocalLightingTargetId, desired->revision);
   }
 }
 
@@ -52,11 +52,11 @@ void SceneDeliveryCoordinator::deliverRemote(const NodeRecord &record,
     return;
   }
 
-  const DesiredLightingState *desired = scenes_.desiredFor(record.nodeId);
+  const DesiredLightingState *desired = lighting_.desiredFor(record.nodeId);
   if (desired == nullptr || !desired->pending()) return;
   if (record.lastAppliedSceneRevision == desired->revision &&
       record.lastCommandError == 0U) {
-    scenes_.markDelivered(record.nodeId, desired->revision);
+    lighting_.markDelivered(record.nodeId, desired->revision);
     return;
   }
 

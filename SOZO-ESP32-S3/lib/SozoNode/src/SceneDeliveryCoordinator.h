@@ -1,6 +1,6 @@
 #pragma once
 
-#include <LightingSceneOrchestrator.h>
+#include <LightingControlApplication.h>
 #include <NodeFleetCoordinator.h>
 
 namespace sozo {
@@ -15,7 +15,7 @@ class LocalLightingTarget {
 
 class SceneDeliveryCoordinator {
  public:
-  SceneDeliveryCoordinator(LightingSceneOrchestrator &scenes,
+  SceneDeliveryCoordinator(LightingControlApplication &lighting,
                            LocalLightingTarget &localTarget,
                            NodeFleetCoordinator &nodes);
 
@@ -35,7 +35,7 @@ class SceneDeliveryCoordinator {
 
   static constexpr uint32_t kRetryDelayMs = 3000U;
 
-  LightingSceneOrchestrator &scenes_;
+  LightingControlApplication &lighting_;
   LocalLightingTarget &localTarget_;
   NodeFleetCoordinator &nodes_;
   Attempt attempts_[LightingSceneOrchestrator::kMaxTargets]{};

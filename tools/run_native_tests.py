@@ -28,7 +28,7 @@ COMMON_SOURCES = [
     "SOZO-Common/lib/SozoNodeProtocol/src/SozoNodeMessages.cpp",
     "SOZO-Common/lib/SozoNodeProtocol/src/SozoNodeProtocol.cpp",
     "SOZO-Common/lib/SozoSceneCore/src/LightNodeRuntime.cpp",
-    "SOZO-Common/lib/SozoSceneCore/src/SpaceSceneCoordinator.cpp",
+    "SOZO-Common/lib/SozoSceneCore/src/LightingScene.cpp",
     "SOZO-Common/lib/SpatialLightCore/src/SpatialLightCore.cpp",
 ]
 

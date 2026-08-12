@@ -100,7 +100,7 @@ void test_restoring_follow_mode_reapplies_the_follow_scene() {
   CHECK_EQ(sozo::LightSceneApplyResult::Applied,
            runtime.applyScene(follow, 1U, 10U, 10U));
   CHECK_TRUE(runtime.setControlMode(
-      sozo::node::NodeControlMode::Independent));
+      sozo::LightControlMode::Independent));
   sozo::LightingScene independent = follow;
   independent.primaryColor = {88U, 77U, 66U};
   CHECK_EQ(sozo::LightSceneApplyResult::Applied,
@@ -109,9 +109,9 @@ void test_restoring_follow_mode_reapplies_the_follow_scene() {
   CHECK_EQ(88U, sink.state().primaryColor.red);
 
   sozo::LightNodeControlState rollback = runtime.controlState();
-  rollback.controlMode = sozo::node::NodeControlMode::FollowMain;
+  rollback.controlMode = sozo::LightControlMode::FollowScene;
   CHECK_TRUE(runtime.restoreControlState(rollback));
-  CHECK_EQ(sozo::node::NodeControlMode::FollowMain, runtime.controlMode());
+  CHECK_EQ(sozo::LightControlMode::FollowScene, runtime.controlMode());
   CHECK_EQ(10U, sink.state().primaryColor.red);
 }
 
@@ -124,7 +124,7 @@ void test_first_mode_change_after_restart_can_roll_back_to_local_follow_output()
   runtime.begin(local);
 
   sozo::LightNodeControlState restored{};
-  restored.controlMode = sozo::node::NodeControlMode::FollowMain;
+  restored.controlMode = sozo::LightControlMode::FollowScene;
   restored.hasIndependentScene = true;
   restored.independentState = local;
   restored.independentState.primaryColor = {88U, 77U, 66U};
@@ -133,10 +133,10 @@ void test_first_mode_change_after_restart_can_roll_back_to_local_follow_output()
   const sozo::LightNodeControlState before = runtime.controlState();
 
   CHECK_TRUE(runtime.setControlMode(
-      sozo::node::NodeControlMode::Independent));
+      sozo::LightControlMode::Independent));
   CHECK_EQ(88U, sink.state().primaryColor.red);
   CHECK_TRUE(runtime.restoreControlState(before));
-  CHECK_EQ(sozo::node::NodeControlMode::FollowMain, runtime.controlMode());
+  CHECK_EQ(sozo::LightControlMode::FollowScene, runtime.controlMode());
   CHECK_EQ(42U, sink.state().primaryColor.red);
 }
 

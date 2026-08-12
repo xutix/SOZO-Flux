@@ -4,12 +4,11 @@
 #include <WebServer.h>
 
 #include <AudioAnalyzer.h>
-#include <CommandRouter.h>
+#include <LightingControlApplication.h>
 #include <NetworkManager.h>
-#include <LightingSceneOrchestrator.h>
-#include <LightingSceneStore.h>
 #include <NodeNameStore.h>
 #include <NodeFleetCoordinator.h>
+#include <NodeFirmwareWebController.h>
 
 namespace sozo {
 
@@ -18,10 +17,9 @@ class WebApi {
   using RestartCallback = void (*)();
   using PageBuilder = String (*)();
 
-  WebApi(CommandRouter &commands, NetworkManager &network,
+  WebApi(LightingControlApplication &lighting, NetworkManager &network,
          AudioAnalyzer &audio, NodeFleetCoordinator &nodes,
-         NodeNameStore &nodeNames, LightingSceneOrchestrator &scenes,
-         LightingSceneStore &sceneStore,
+         NodeNameStore &nodeNames,
          PageBuilder spatialPage,
          RestartCallback restart);
 
@@ -41,7 +39,6 @@ class WebApi {
   void handleGetLayout();
   void handleSetLayout();
   void handleSetLighting();
-  void handleSetNodeMode();
   void handleSetNodeLighting();
   void handleSetNodeLedCount();
   void handleSetNodeLayout();
@@ -52,9 +49,6 @@ class WebApi {
   void handleActivateScene();
   void handleDeleteScene();
   void handleSetTargetLighting();
-  void handleNodeFirmwareUpload();
-  void handleNodeFirmwareUploadData();
-  void handleGetNodeFirmwareStatus();
   void handleSetMode();
   void handleSetColor();
   void handleSetBrightness();
@@ -70,26 +64,15 @@ class WebApi {
   bool dispatchWebLayout(const spatial_light::SpatialLayout &layout);
   String buildLayoutJson() const;
   String buildLightingSettingsJson() const;
-  bool parseLightingRequest(PersistedLightingState &next,
-                            EffectMode &requestedMode, bool allowNodeId,
-                            String &error);
-
   WebServer server_;
-  CommandRouter &commands_;
+  LightingControlApplication &lighting_;
   NetworkManager &network_;
   AudioAnalyzer &audio_;
   NodeFleetCoordinator &nodes_;
   NodeNameStore &nodeNames_;
-  LightingSceneOrchestrator &scenes_;
-  LightingSceneStore &sceneStore_;
   PageBuilder spatialPage_;
   RestartCallback restart_;
-  uint8_t *nodeFirmwareImage_{nullptr};
-  size_t nodeFirmwareSize_{0U};
-  size_t nodeFirmwareReceived_{0U};
-  node::NodeId nodeFirmwareTarget_{0U};
-  String nodeFirmwareUploadError_{};
-  bool nodeFirmwareUploadComplete_{false};
+  NodeFirmwareWebController nodeFirmware_;
 };
 
 }  // namespace sozo

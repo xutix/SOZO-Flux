@@ -17,8 +17,7 @@ class NodeFleetCoordinator {
   ~NodeFleetCoordinator();
 
   bool begin();
-  void tick(uint32_t nowMs, const SpaceSceneSnapshot &scene,
-            const AudioFrame &audioFrame);
+  void tick(uint32_t nowMs, const AudioFrame &audioFrame);
 
   const NodeRegistry &registry() const;
   size_t onlineCount() const;
@@ -37,9 +36,6 @@ class NodeFleetCoordinator {
 
   bool requestNodeControlMode(node::NodeId nodeId,
                               node::NodeControlMode mode, uint32_t nowMs);
-  bool requestIndependentScene(node::NodeId nodeId,
-                               const PersistedLightingState &state,
-                               uint32_t nowMs);
   bool requestDesiredScene(node::NodeId nodeId, const LightingScene &scene,
                            uint32_t revision, uint32_t nowMs);
   bool requestNodeLedCount(node::NodeId nodeId, uint16_t ledCount,

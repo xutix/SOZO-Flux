@@ -2,8 +2,7 @@
 
 #include <stdint.h>
 
-#include <SpaceSceneCoordinator.h>
-#include <SozoNodeProtocol.h>
+#include <LightingScene.h>
 
 namespace sozo {
 
@@ -29,11 +28,16 @@ enum class LightSceneTarget : uint8_t {
   Independent = 1,
 };
 
+enum class LightControlMode : uint8_t {
+  FollowScene = 0,
+  Independent = 1,
+};
+
 struct LightNodeControlState {
   static constexpr uint32_t kSchemaVersion = 1U;
 
   uint32_t schemaVersion{kSchemaVersion};
-  node::NodeControlMode controlMode{node::NodeControlMode::FollowMain};
+  LightControlMode controlMode{LightControlMode::FollowScene};
   PersistedLightingState independentState{};
   int16_t independentManualLitPixelCount{-1};
   uint32_t independentRevision{0U};
@@ -56,8 +60,8 @@ class LightNodeRuntime {
   void updateLocalConfiguration(
       const LocalLightConfiguration &configuration,
       const AudioTuning &audio);
-  bool setControlMode(node::NodeControlMode mode);
-  node::NodeControlMode controlMode() const;
+  bool setControlMode(LightControlMode mode);
+  LightControlMode controlMode() const;
   LightNodeControlState controlState() const;
   bool restoreControlState(const LightNodeControlState &state);
   bool applyAudioFrame(const AudioFrame &audio, uint32_t sequence);
@@ -87,7 +91,7 @@ class LightNodeRuntime {
   AudioFrame audio_{};
   SceneSlot followScene_{};
   SceneSlot independentScene_{};
-  node::NodeControlMode controlMode_{node::NodeControlMode::FollowMain};
+  LightControlMode controlMode_{LightControlMode::FollowScene};
   uint32_t lastAudioSequence_{0U};
   uint32_t clockOffsetMs_{0U};
   bool hasAudioSequence_{false};

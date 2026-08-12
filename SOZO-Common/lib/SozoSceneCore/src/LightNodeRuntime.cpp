@@ -10,7 +10,7 @@ void LightNodeRuntime::begin(const PersistedLightingState &localState) {
   audio_ = {};
   followScene_ = {};
   independentScene_ = {};
-  controlMode_ = node::NodeControlMode::FollowMain;
+  controlMode_ = LightControlMode::FollowScene;
   lastAudioSequence_ = 0U;
   clockOffsetMs_ = 0U;
   hasAudioSequence_ = false;
@@ -43,9 +43,9 @@ LightSceneApplyResult LightNodeRuntime::applyScene(
   slot.available = true;
   clockOffsetMs_ = coordinatorTimestampMs - localNowMs;
   if ((target == LightSceneTarget::FollowSpace &&
-       controlMode_ == node::NodeControlMode::FollowMain) ||
+       controlMode_ == LightControlMode::FollowScene) ||
       (target == LightSceneTarget::Independent &&
-       controlMode_ == node::NodeControlMode::Independent)) {
+       controlMode_ == LightControlMode::Independent)) {
     applySlot(slot);
   }
   return LightSceneApplyResult::Applied;
@@ -95,25 +95,25 @@ void LightNodeRuntime::updateLocalConfiguration(
   }
   lighting_.applyState(next);
   const SceneSlot &active =
-      controlMode_ == node::NodeControlMode::Independent ? independentScene_
+      controlMode_ == LightControlMode::Independent ? independentScene_
                                                           : followScene_;
   if (active.available && active.manualLitPixelCount >= 0) {
     applyManualPixelCount(active.manualLitPixelCount);
   }
 }
 
-bool LightNodeRuntime::setControlMode(const node::NodeControlMode mode) {
-  if (mode != node::NodeControlMode::FollowMain &&
-      mode != node::NodeControlMode::Independent) {
+bool LightNodeRuntime::setControlMode(const LightControlMode mode) {
+  if (mode != LightControlMode::FollowScene &&
+      mode != LightControlMode::Independent) {
     return false;
   }
   if (mode == controlMode_) return true;
-  if (controlMode_ == node::NodeControlMode::FollowMain &&
-      mode == node::NodeControlMode::Independent &&
+  if (controlMode_ == LightControlMode::FollowScene &&
+      mode == LightControlMode::Independent &&
       !followScene_.available) {
     followScene_ = SceneSlot{lighting_.state(), -1, 0U, true};
   }
-  if (mode == node::NodeControlMode::Independent &&
+  if (mode == LightControlMode::Independent &&
       !independentScene_.available) {
     independentScene_ = followScene_.available
                             ? followScene_
@@ -121,13 +121,13 @@ bool LightNodeRuntime::setControlMode(const node::NodeControlMode mode) {
   }
   controlMode_ = mode;
   const SceneSlot &active =
-      controlMode_ == node::NodeControlMode::Independent ? independentScene_
+      controlMode_ == LightControlMode::Independent ? independentScene_
                                                           : followScene_;
   if (active.available) applySlot(active);
   return true;
 }
 
-node::NodeControlMode LightNodeRuntime::controlMode() const {
+LightControlMode LightNodeRuntime::controlMode() const {
   return controlMode_;
 }
 
@@ -145,9 +145,9 @@ LightNodeControlState LightNodeRuntime::controlState() const {
 bool LightNodeRuntime::restoreControlState(
     const LightNodeControlState &state) {
   if (state.schemaVersion != LightNodeControlState::kSchemaVersion ||
-      (state.controlMode != node::NodeControlMode::FollowMain &&
-       state.controlMode != node::NodeControlMode::Independent) ||
-      (state.controlMode == node::NodeControlMode::Independent &&
+      (state.controlMode != LightControlMode::FollowScene &&
+       state.controlMode != LightControlMode::Independent) ||
+      (state.controlMode == LightControlMode::Independent &&
        !state.hasIndependentScene)) {
     return false;
   }
@@ -166,7 +166,7 @@ bool LightNodeRuntime::restoreControlState(
     independentScene_.available = true;
   }
   controlMode_ = state.controlMode;
-  if (controlMode_ == node::NodeControlMode::Independent) {
+  if (controlMode_ == LightControlMode::Independent) {
     applySlot(independentScene_);
   } else if (followScene_.available) {
     applySlot(followScene_);
@@ -199,7 +199,7 @@ void LightNodeRuntime::onDisconnected() {
 
 uint32_t LightNodeRuntime::lastAppliedSceneRevision() const {
   const LightSceneTarget target =
-      controlMode_ == node::NodeControlMode::Independent
+      controlMode_ == LightControlMode::Independent
           ? LightSceneTarget::Independent
           : LightSceneTarget::FollowSpace;
   return slotFor(target).revision;

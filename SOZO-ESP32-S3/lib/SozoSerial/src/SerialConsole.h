@@ -2,13 +2,13 @@
 
 #include <Arduino.h>
 
-#include <CommandRouter.h>
+#include <LightingControlApplication.h>
 
 namespace sozo {
 
 class SerialConsole {
  public:
-  SerialConsole(Stream &stream, CommandRouter &router);
+  SerialConsole(Stream &stream, LightingControlApplication &lighting);
 
   void begin();
   void tick();
@@ -19,7 +19,7 @@ class SerialConsole {
   void printHelp();
 
   Stream &stream_;
-  CommandRouter &router_;
+  LightingControlApplication &lighting_;
   char inputBuffer_[8];
   uint8_t inputLength_;
   uint32_t lastInputAt_;

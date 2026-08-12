@@ -69,11 +69,19 @@ bool NodeSceneRuntime::setLocalLayout(
 }
 
 bool NodeSceneRuntime::setControlMode(const node::NodeControlMode mode) {
-  return runtime_.setControlMode(mode);
+  if (mode == node::NodeControlMode::FollowMain) {
+    return runtime_.setControlMode(LightControlMode::FollowScene);
+  }
+  if (mode == node::NodeControlMode::Independent) {
+    return runtime_.setControlMode(LightControlMode::Independent);
+  }
+  return false;
 }
 
 node::NodeControlMode NodeSceneRuntime::controlMode() const {
-  return runtime_.controlMode();
+  return runtime_.controlMode() == LightControlMode::Independent
+             ? node::NodeControlMode::Independent
+             : node::NodeControlMode::FollowMain;
 }
 
 NodeControlState NodeSceneRuntime::controlState() const {

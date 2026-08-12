@@ -1,10 +1,8 @@
 #include <WebApi.h>
 
+#include <LightingHttpCodec.h>
 #include <SozoVersion.h>
 #include <SpatialLightCore.h>
-
-#include <esp_heap_caps.h>
-#include <mbedtls/sha256.h>
 
 #ifndef SOZO_LOCAL_LIGHT_ENABLED
 #define SOZO_LOCAL_LIGHT_ENABLED 1
@@ -15,273 +13,10 @@ namespace {
 using sozo::EffectMode;
 using sozo::LightingScene;
 using sozo::PersistedLightingState;
+using sozo::web::appendLightingSceneJson;
+using sozo::web::escapeJson;
 
 constexpr uint16_t kMaxLedCount = spatial_light::kMaxLedCount;
-constexpr size_t kMaxC3FirmwareBytes = 0x140000U;
-constexpr uint16_t kEsp32C3ImageChipId = 5U;
-
-bool validC3FirmwareImage(const uint8_t *image, const size_t imageSize) {
-  if (image == nullptr || imageSize < 24U ||
-      imageSize > kMaxC3FirmwareBytes || image[0] != 0xE9U) {
-    return false;
-  }
-  const uint16_t chipId = static_cast<uint16_t>(image[12]) |
-                          (static_cast<uint16_t>(image[13]) << 8U);
-  return chipId == kEsp32C3ImageChipId;
-}
-
-const char *firmwareTransferStateName(
-    const sozo::NodeFirmwareTransferState state) {
-  switch (state) {
-    case sozo::NodeFirmwareTransferState::Starting:
-      return "starting";
-    case sozo::NodeFirmwareTransferState::Sending:
-      return "sending";
-    case sozo::NodeFirmwareTransferState::Finalizing:
-      return "verifying";
-    case sozo::NodeFirmwareTransferState::Succeeded:
-      return "restarting";
-    case sozo::NodeFirmwareTransferState::Failed:
-      return "failed";
-    case sozo::NodeFirmwareTransferState::Idle:
-    default:
-      return "idle";
-  }
-}
-
-const char *firmwareErrorName(const sozo::node::FirmwareUpdateError error) {
-  switch (error) {
-    case sozo::node::FirmwareUpdateError::InvalidImage:
-      return "invalid_image";
-    case sozo::node::FirmwareUpdateError::ImageTooLarge:
-      return "image_too_large";
-    case sozo::node::FirmwareUpdateError::WriteFailed:
-      return "write_failed";
-    case sozo::node::FirmwareUpdateError::HashMismatch:
-      return "hash_mismatch";
-    case sozo::node::FirmwareUpdateError::UnexpectedOffset:
-      return "unexpected_offset";
-    case sozo::node::FirmwareUpdateError::Timeout:
-      return "timeout";
-    case sozo::node::FirmwareUpdateError::LinkLost:
-      return "link_lost";
-    case sozo::node::FirmwareUpdateError::Unsupported:
-      return "unsupported";
-    case sozo::node::FirmwareUpdateError::Busy:
-      return "busy";
-    case sozo::node::FirmwareUpdateError::Unauthorized:
-      return "unauthorized";
-    case sozo::node::FirmwareUpdateError::NotStarted:
-      return "not_started";
-    case sozo::node::FirmwareUpdateError::None:
-    default:
-      return "none";
-  }
-}
-
-const char *modeName(const EffectMode mode) {
-  switch (mode) {
-    case EffectMode::Static:
-      return "static";
-    case EffectMode::Rainbow:
-      return "rainbow";
-    case EffectMode::Breathe:
-      return "breathe";
-    case EffectMode::Music:
-      return "music";
-    case EffectMode::Comet:
-      return "comet";
-    case EffectMode::Aurora:
-      return "aurora";
-    case EffectMode::FlameAudio:
-      return "flame_audio";
-    case EffectMode::GlassFlow:
-      return "glass_flow";
-    case EffectMode::CornerPulse:
-      return "corner_pulse";
-    case EffectMode::BassRipple:
-      return "bass_ripple";
-    case EffectMode::Focus:
-      return "focus";
-    case EffectMode::Off:
-    default:
-      return "off";
-  }
-}
-
-const char *lightingEffectId(const EffectMode mode) {
-  switch (mode) {
-    case EffectMode::Static:
-      return "SOLID";
-    case EffectMode::Rainbow:
-      return "RAINBOW";
-    case EffectMode::Comet:
-      return "COMET";
-    case EffectMode::Music:
-      return "AUDIO";
-    case EffectMode::Breathe:
-      return "BREATH";
-    case EffectMode::Aurora:
-      return "AURORA";
-    case EffectMode::FlameAudio:
-      return "FLAME_AUDIO";
-    case EffectMode::GlassFlow:
-      return "GLASS_FLOW";
-    case EffectMode::CornerPulse:
-      return "CORNER_PULSE";
-    case EffectMode::BassRipple:
-      return "BASS_RIPPLE";
-    case EffectMode::Focus:
-      return "FOCUS";
-    case EffectMode::Off:
-    default:
-      return "OFF";
-  }
-}
-
-bool parseMode(const String &value, EffectMode &mode) {
-  if (value == "static") mode = EffectMode::Static;
-  else if (value == "rainbow") mode = EffectMode::Rainbow;
-  else if (value == "breathe") mode = EffectMode::Breathe;
-  else if (value == "music") mode = EffectMode::Music;
-  else if (value == "comet") mode = EffectMode::Comet;
-  else if (value == "aurora") mode = EffectMode::Aurora;
-  else if (value == "flame_audio") mode = EffectMode::FlameAudio;
-  else if (value == "glass_flow") mode = EffectMode::GlassFlow;
-  else if (value == "corner_pulse") mode = EffectMode::CornerPulse;
-  else if (value == "bass_ripple") mode = EffectMode::BassRipple;
-  else if (value == "focus") mode = EffectMode::Focus;
-  else if (value == "off") mode = EffectMode::Off;
-  else return false;
-  return true;
-}
-
-bool parseLightingEffect(const String &value, EffectMode &mode) {
-  if (value == "OFF") mode = EffectMode::Off;
-  else if (value == "SOLID") mode = EffectMode::Static;
-  else if (value == "RAINBOW") mode = EffectMode::Rainbow;
-  else if (value == "COMET") mode = EffectMode::Comet;
-  else if (value == "AUDIO") mode = EffectMode::Music;
-  else if (value == "BREATH") mode = EffectMode::Breathe;
-  else if (value == "AURORA") mode = EffectMode::Aurora;
-  else if (value == "FLAME_AUDIO") mode = EffectMode::FlameAudio;
-  else if (value == "GLASS_FLOW") mode = EffectMode::GlassFlow;
-  else if (value == "CORNER_PULSE") mode = EffectMode::CornerPulse;
-  else if (value == "BASS_RIPPLE") mode = EffectMode::BassRipple;
-  else if (value == "FOCUS") mode = EffectMode::Focus;
-  else return false;
-  return true;
-}
-
-String escapeJson(const String &value) {
-  String escaped;
-  escaped.reserve(value.length() + 8);
-  for (size_t index = 0; index < value.length(); ++index) {
-    const char character = value[index];
-    switch (character) {
-      case '\\':
-        escaped += F("\\\\");
-        break;
-      case '"':
-        escaped += F("\\\"");
-        break;
-      case '\n':
-        escaped += F("\\n");
-        break;
-      case '\r':
-        escaped += F("\\r");
-        break;
-      case '\t':
-        escaped += F("\\t");
-        break;
-      default: {
-        const uint8_t byte = static_cast<uint8_t>(character);
-        if (byte < 0x20) {
-          char encoded[7];
-          snprintf(encoded, sizeof(encoded), "\\u%04x", byte);
-          escaped += encoded;
-        } else {
-          escaped += character;
-        }
-      }
-    }
-  }
-  return escaped;
-}
-
-bool parseHexColor(const String &value, uint8_t &red, uint8_t &green,
-                   uint8_t &blue) {
-  if (value.length() != 7 || value[0] != '#') return false;
-  char *end = nullptr;
-  const unsigned long parsed = strtoul(value.c_str() + 1, &end, 16);
-  if (end == nullptr || *end != '\0') return false;
-  red = static_cast<uint8_t>((parsed >> 16) & 0xff);
-  green = static_cast<uint8_t>((parsed >> 8) & 0xff);
-  blue = static_cast<uint8_t>(parsed & 0xff);
-  return true;
-}
-
-bool supportedLightingArgument(const String &name) {
-  return name == "effect" || name == "brightness" || name == "color" ||
-         name == "rainbowStyle" || name == "flowSpeed" || name == "style" ||
-         name == "cometTail" || name == "cometSpeed" ||
-         name == "cometDensity" || name == "cometBackground" ||
-         name == "effectFlags" || name == "sensitivityX100" ||
-         name == "audioColorGainX100" || name == "audioHueDrive" ||
-         name == "breathFloorPercent" || name == "secondaryColor" ||
-         name == "pulseAmplitudePercent" || name == "pulseHeightPercent" ||
-         name == "animationBrightness" || name == "audioSource";
-}
-
-void appendLightingSceneJson(String &json, const LightingScene &scene) {
-  char primary[8];
-  char secondary[8];
-  snprintf(primary, sizeof(primary), "#%02X%02X%02X", scene.primaryColor.red,
-           scene.primaryColor.green, scene.primaryColor.blue);
-  snprintf(secondary, sizeof(secondary), "#%02X%02X%02X",
-           scene.settings.secondaryRed, scene.settings.secondaryGreen,
-           scene.settings.secondaryBlue);
-  json += F("{\"effect\":\"");
-  json += lightingEffectId(scene.mode);
-  json += F("\",\"settings\":{\"brightness\":");
-  json += scene.brightness;
-  json += F(",\"color\":\"");
-  json += primary;
-  json += F("\",\"rainbowStyle\":");
-  json += scene.settings.rainbowStyle;
-  json += F(",\"flowSpeed\":");
-  json += scene.settings.flowSpeed;
-  json += F(",\"cometTail\":");
-  json += scene.settings.cometTail;
-  json += F(",\"cometSpeed\":");
-  json += scene.settings.cometSpeed;
-  json += F(",\"cometDensity\":");
-  json += scene.settings.cometDensity;
-  json += F(",\"cometBackground\":");
-  json += scene.settings.cometBackground;
-  json += F(",\"effectFlags\":");
-  json += scene.settings.cometRandom ? 1 : 0;
-  json += F(",\"sensitivityX100\":");
-  json += scene.settings.audioSensitivityX100;
-  json += F(",\"style\":");
-  json += scene.mode == EffectMode::Comet ? scene.cometColorStyle
-                                          : scene.audioColorStyle;
-  json += F(",\"audioColorGainX100\":");
-  json += scene.settings.audioColorGainX100;
-  json += F(",\"audioHueDrive\":");
-  json += scene.settings.audioHueDrive;
-  json += F(",\"breathFloorPercent\":");
-  json += scene.settings.breathFloorPercent;
-  json += F(",\"secondaryColor\":\"");
-  json += secondary;
-  json += F("\",\"pulseAmplitudePercent\":");
-  json += scene.settings.pulseAmplitudePercent;
-  json += F(",\"pulseHeightPercent\":");
-  json += scene.settings.pulseHeightPercent;
-  json += F(",\"animationBrightness\":");
-  json += scene.settings.animationBrightness;
-  json += F("}}");
-}
 
 String buildProvisioningPage() {
   static const char page[] PROGMEM = R"HTML(
@@ -310,38 +45,29 @@ String lightingTargetId(LightingTargetId targetId);
 bool parseSceneId(const String &value, LightingSceneId &sceneId,
                   bool allowZero = false);
 
-WebApi::WebApi(CommandRouter &commands, NetworkManager &network,
+WebApi::WebApi(LightingControlApplication &lighting, NetworkManager &network,
                AudioAnalyzer &audio, NodeFleetCoordinator &nodes,
-               NodeNameStore &nodeNames, LightingSceneOrchestrator &scenes,
-               LightingSceneStore &sceneStore, const PageBuilder spatialPage,
+               NodeNameStore &nodeNames, const PageBuilder spatialPage,
                const RestartCallback restart)
     : server_(80),
-      commands_(commands),
+      lighting_(lighting),
       network_(network),
       audio_(audio),
       nodes_(nodes),
       nodeNames_(nodeNames),
-      scenes_(scenes),
-      sceneStore_(sceneStore),
       spatialPage_(spatialPage),
-      restart_(restart) {}
+      restart_(restart),
+      nodeFirmware_(server_, nodes_) {}
 
 void WebApi::begin() {
   registerRoutes();
+  nodeFirmware_.registerRoutes();
   server_.begin();
 }
 
 void WebApi::handleClient() {
   server_.handleClient();
-  if (nodeFirmwareImage_ != nullptr && nodeFirmwareUploadComplete_ &&
-      nodes_.firmwareUpdateStatus().state == NodeFirmwareTransferState::Idle) {
-    heap_caps_free(nodeFirmwareImage_);
-    nodeFirmwareImage_ = nullptr;
-    nodeFirmwareSize_ = 0U;
-    nodeFirmwareReceived_ = 0U;
-    nodeFirmwareTarget_ = 0U;
-    nodeFirmwareUploadComplete_ = false;
-  }
+  nodeFirmware_.tick();
 }
 
 void WebApi::registerRoutes() {
@@ -356,8 +82,6 @@ void WebApi::registerRoutes() {
   server_.on("/api/layout", HTTP_GET, [this]() { handleGetLayout(); });
   server_.on("/api/layout", HTTP_POST, [this]() { handleSetLayout(); });
   server_.on("/api/lighting", HTTP_POST, [this]() { handleSetLighting(); });
-  server_.on("/api/node/mode", HTTP_POST,
-             [this]() { handleSetNodeMode(); });
   server_.on("/api/node/lighting", HTTP_POST,
              [this]() { handleSetNodeLighting(); });
   server_.on("/api/node/led-count", HTTP_POST,
@@ -376,11 +100,6 @@ void WebApi::registerRoutes() {
              [this]() { handleDeleteScene(); });
   server_.on("/api/target/lighting", HTTP_POST,
              [this]() { handleSetTargetLighting(); });
-  server_.on("/api/node/firmware", HTTP_GET,
-             [this]() { handleGetNodeFirmwareStatus(); });
-  server_.on("/api/node/firmware", HTTP_POST,
-             [this]() { handleNodeFirmwareUpload(); },
-             [this]() { handleNodeFirmwareUploadData(); });
   server_.on("/api/mode", HTTP_GET, [this]() { handleSetMode(); });
   server_.on("/api/color", HTTP_GET, [this]() { handleSetColor(); });
   server_.on("/api/brightness", HTTP_GET,
@@ -413,7 +132,7 @@ bool WebApi::dispatchWebControl(const ControlCommandType type,
   const ControlCommand command{
       kControlProtocolVersion, ControlSource::Web, 0, type, parameter, value,
       color, makeDefaultSpatialLayout()};
-  return commands_.dispatch(command).accepted();
+  return lighting_.dispatch(command, millis()).accepted();
 }
 
 bool WebApi::dispatchWebLayout(const spatial_light::SpatialLayout &layout) {
@@ -427,7 +146,7 @@ bool WebApi::dispatchWebLayout(const spatial_light::SpatialLayout &layout) {
       {0, 0, 0},
       layout,
   };
-  return commands_.dispatch(command).accepted();
+  return lighting_.dispatch(command, millis()).accepted();
 }
 
 void WebApi::handleRoot() {
@@ -494,7 +213,7 @@ void WebApi::handleWiFiReset() {
 }
 
 String WebApi::buildLayoutJson() const {
-  const StateSnapshot snapshot = commands_.snapshot();
+  const LightingApplicationSnapshot snapshot = lighting_.snapshot();
   const spatial_light::SpatialLayout &layout = snapshot.lighting.layout;
   String json;
   json.reserve(180);
@@ -521,7 +240,7 @@ String WebApi::buildLayoutJson() const {
 }
 
 String WebApi::buildLightingSettingsJson() const {
-  const StateSnapshot snapshot = commands_.snapshot();
+  const LightingApplicationSnapshot snapshot = lighting_.snapshot();
   const PersistedLightingState &state = snapshot.lighting;
   char colorHex[8];
   char secondaryHex[8];
@@ -593,7 +312,7 @@ void WebApi::handleSetLayout() {
     sendApiResult(false, "profile must be continuous or segmented");
     return;
   }
-  const StateSnapshot snapshot = commands_.snapshot();
+  const LightingApplicationSnapshot snapshot = lighting_.snapshot();
   spatial_light::SpatialLayout candidate = snapshot.lighting.layout;
   candidate.activeCount = static_cast<uint16_t>(requestedCount);
   candidate.reversed =
@@ -644,103 +363,6 @@ void WebApi::handleSetLayout() {
   server_.send(200, "application/json; charset=utf-8", json);
 }
 
-bool WebApi::parseLightingRequest(PersistedLightingState &next,
-                                  EffectMode &requestedMode,
-                                  const bool allowNodeId,
-                                  String &error) {
-  if (!server_.hasArg("effect")) {
-    error = F("effect is required");
-    return false;
-  }
-  for (uint8_t index = 0; index < server_.args(); ++index) {
-    const String name = server_.argName(index);
-    if ((allowNodeId && name == "id") || name == "sceneId" ||
-        name == "name" || name == "targets" ||
-        supportedLightingArgument(name)) {
-      continue;
-    }
-    error = F("unsupported lighting parameter");
-    return false;
-  }
-  if (server_.hasArg("audioSource") && server_.arg("audioSource") != "mic" &&
-      server_.arg("audioSource") != "1") {
-    error = F("only device microphone is available");
-    return false;
-  }
-  if (!parseLightingEffect(server_.arg("effect"), requestedMode)) {
-    error = F("unsupported effect");
-    return false;
-  }
-  next = commands_.snapshot().lighting;
-  next.mode = requestedMode;
-  if (server_.hasArg("brightness"))
-    next.brightness = static_cast<uint8_t>(
-        constrain(server_.arg("brightness").toInt(), 0, 255));
-  if (server_.hasArg("color") &&
-      !parseHexColor(server_.arg("color"), next.primaryColor.red,
-                     next.primaryColor.green, next.primaryColor.blue)) {
-    error = F("color must be #RRGGBB");
-    return false;
-  }
-  if (server_.hasArg("rainbowStyle"))
-    next.lighting.rainbowStyle = static_cast<uint8_t>(
-        constrain(server_.arg("rainbowStyle").toInt(), 0, 2));
-  if (server_.hasArg("flowSpeed"))
-    next.lighting.flowSpeed =
-        static_cast<uint8_t>(constrain(server_.arg("flowSpeed").toInt(), 1, 100));
-  if (server_.hasArg("style")) {
-    if (requestedMode == EffectMode::Comet)
-      next.cometColorStyle = static_cast<uint8_t>(
-          constrain(server_.arg("style").toInt(), 0, 4));
-    else if (requestedMode == EffectMode::Music)
-      next.audioColorStyle = static_cast<uint8_t>(
-          constrain(server_.arg("style").toInt(), 0, 4));
-  }
-  if (server_.hasArg("cometTail"))
-    next.lighting.cometTail = static_cast<uint8_t>(
-        constrain(server_.arg("cometTail").toInt(), 5, 80));
-  if (server_.hasArg("cometSpeed"))
-    next.lighting.cometSpeed = static_cast<uint8_t>(
-        constrain(server_.arg("cometSpeed").toInt(), 1, 50));
-  if (server_.hasArg("cometDensity"))
-    next.lighting.cometDensity = static_cast<uint8_t>(
-        constrain(server_.arg("cometDensity").toInt(), 1, 8));
-  if (server_.hasArg("cometBackground"))
-    next.lighting.cometBackground = static_cast<uint8_t>(
-        constrain(server_.arg("cometBackground").toInt(), 0, 60));
-  if (server_.hasArg("effectFlags"))
-    next.lighting.cometRandom = (server_.arg("effectFlags").toInt() & 1) != 0;
-  if (server_.hasArg("sensitivityX100"))
-    next.lighting.audioSensitivityX100 = static_cast<uint16_t>(
-        constrain(server_.arg("sensitivityX100").toInt(), 10, 500));
-  if (server_.hasArg("audioColorGainX100"))
-    next.lighting.audioColorGainX100 = static_cast<uint16_t>(
-        constrain(server_.arg("audioColorGainX100").toInt(), 0, 500));
-  if (server_.hasArg("audioHueDrive"))
-    next.lighting.audioHueDrive = static_cast<uint8_t>(
-        constrain(server_.arg("audioHueDrive").toInt(), 0, 3));
-  if (server_.hasArg("breathFloorPercent"))
-    next.lighting.breathFloorPercent = static_cast<uint8_t>(
-        constrain(server_.arg("breathFloorPercent").toInt(), 0, 60));
-  if (server_.hasArg("pulseAmplitudePercent"))
-    next.lighting.pulseAmplitudePercent = static_cast<uint8_t>(
-        constrain(server_.arg("pulseAmplitudePercent").toInt(), 0, 100));
-  if (server_.hasArg("pulseHeightPercent"))
-    next.lighting.pulseHeightPercent = static_cast<uint8_t>(
-        constrain(server_.arg("pulseHeightPercent").toInt(), 0, 100));
-  if (server_.hasArg("animationBrightness"))
-    next.lighting.animationBrightness = static_cast<uint8_t>(
-        constrain(server_.arg("animationBrightness").toInt(), 0, 255));
-  if (server_.hasArg("secondaryColor") &&
-      !parseHexColor(server_.arg("secondaryColor"), next.lighting.secondaryRed,
-                     next.lighting.secondaryGreen,
-                     next.lighting.secondaryBlue)) {
-    error = F("secondaryColor must be #RRGGBB");
-    return false;
-  }
-  return true;
-}
-
 bool parseNodeId(const String &value, sozo::node::NodeId &nodeId) {
   if (value.length() == 0) return false;
   char *end = nullptr;
@@ -766,10 +388,11 @@ bool parseLedCount(const String &value, uint16_t &ledCount) {
 }
 
 void WebApi::handleSetLighting() {
-  PersistedLightingState next{};
-  EffectMode requestedMode{};
+  const LightingScene fallback =
+      makeLightingScene(lighting_.snapshot().lighting);
+  LightingScene next{};
   String error;
-  if (!parseLightingRequest(next, requestedMode, false, error)) {
+  if (!web::parseLightingRequest(server_, next, fallback, false, error)) {
     sendApiResult(false, error.c_str());
     return;
   }
@@ -778,9 +401,9 @@ void WebApi::handleSetLighting() {
       (static_cast<int32_t>(next.primaryColor.green) << 8) |
       next.primaryColor.blue;
   const int32_t secondaryColor =
-      (static_cast<int32_t>(next.lighting.secondaryRed) << 16) |
-      (static_cast<int32_t>(next.lighting.secondaryGreen) << 8) |
-      next.lighting.secondaryBlue;
+      (static_cast<int32_t>(next.settings.secondaryRed) << 16) |
+      (static_cast<int32_t>(next.settings.secondaryGreen) << 8) |
+      next.settings.secondaryBlue;
   const bool accepted =
       dispatchWebControl(ControlCommandType::SetParameter,
                          LightingParameter::Brightness, next.brightness) &&
@@ -789,9 +412,9 @@ void WebApi::handleSetLighting() {
                          next.primaryColor) &&
       dispatchWebControl(ControlCommandType::SetParameter,
                          LightingParameter::RainbowStyle,
-                         next.lighting.rainbowStyle) &&
+      next.settings.rainbowStyle) &&
       dispatchWebControl(ControlCommandType::SetParameter,
-                         LightingParameter::FlowSpeed, next.lighting.flowSpeed) &&
+                         LightingParameter::FlowSpeed, next.settings.flowSpeed) &&
       dispatchWebControl(ControlCommandType::SetParameter,
                          LightingParameter::AudioColorStyle,
                          next.audioColorStyle) &&
@@ -799,86 +422,57 @@ void WebApi::handleSetLighting() {
                          LightingParameter::CometColorStyle,
                          next.cometColorStyle) &&
       dispatchWebControl(ControlCommandType::SetParameter,
-                         LightingParameter::CometTail, next.lighting.cometTail) &&
+                         LightingParameter::CometTail, next.settings.cometTail) &&
       dispatchWebControl(ControlCommandType::SetParameter,
-                         LightingParameter::CometSpeed, next.lighting.cometSpeed) &&
+                         LightingParameter::CometSpeed, next.settings.cometSpeed) &&
       dispatchWebControl(ControlCommandType::SetParameter,
                          LightingParameter::CometDensity,
-                         next.lighting.cometDensity) &&
+                         next.settings.cometDensity) &&
       dispatchWebControl(ControlCommandType::SetParameter,
                          LightingParameter::CometBackground,
-                         next.lighting.cometBackground) &&
+                         next.settings.cometBackground) &&
       dispatchWebControl(ControlCommandType::SetParameter,
                          LightingParameter::CometRandom,
-                         next.lighting.cometRandom ? 1 : 0) &&
+                         next.settings.cometRandom ? 1 : 0) &&
       dispatchWebControl(ControlCommandType::SetParameter,
                          LightingParameter::AudioSensitivity,
-                         next.lighting.audioSensitivityX100) &&
+                         next.settings.audioSensitivityX100) &&
       dispatchWebControl(ControlCommandType::SetParameter,
                          LightingParameter::AudioColorGain,
-                         next.lighting.audioColorGainX100) &&
+                         next.settings.audioColorGainX100) &&
       dispatchWebControl(ControlCommandType::SetParameter,
                          LightingParameter::AudioHueDrive,
-                         next.lighting.audioHueDrive) &&
+                         next.settings.audioHueDrive) &&
       dispatchWebControl(ControlCommandType::SetParameter,
                          LightingParameter::BreathFloor,
-                         next.lighting.breathFloorPercent) &&
+                         next.settings.breathFloorPercent) &&
       dispatchWebControl(ControlCommandType::SetParameter,
                          LightingParameter::SecondaryColor, secondaryColor,
-                         {next.lighting.secondaryRed,
-                          next.lighting.secondaryGreen,
-                          next.lighting.secondaryBlue}) &&
+                          {next.settings.secondaryRed,
+                           next.settings.secondaryGreen,
+                           next.settings.secondaryBlue}) &&
       dispatchWebControl(ControlCommandType::SetParameter,
                          LightingParameter::PulseAmplitude,
-                         next.lighting.pulseAmplitudePercent) &&
+                         next.settings.pulseAmplitudePercent) &&
       dispatchWebControl(ControlCommandType::SetParameter,
                          LightingParameter::PulseHeight,
-                         next.lighting.pulseHeightPercent) &&
+                         next.settings.pulseHeightPercent) &&
       dispatchWebControl(ControlCommandType::SetParameter,
                          LightingParameter::AnimationBrightness,
-                         next.lighting.animationBrightness) &&
+                         next.settings.animationBrightness) &&
       dispatchWebControl(ControlCommandType::SetEffect, LightingParameter::None,
-                         static_cast<int32_t>(requestedMode));
+                          static_cast<int32_t>(next.mode));
   if (!accepted) {
     sendApiResult(false, "lighting command was rejected");
     return;
   }
-  const StateSnapshot updated = commands_.snapshot();
+  const LightingApplicationSnapshot updated = lighting_.snapshot();
   String json = F("{\"ok\":true,\"effect\":\"");
-  json += lightingEffectId(updated.lighting.mode);
+  json += web::effectId(updated.lighting.mode);
   json += F("\",\"settings\":");
   json += buildLightingSettingsJson();
   json += '}';
   server_.send(200, "application/json; charset=utf-8", json);
-}
-
-void WebApi::handleSetNodeMode() {
-  node::NodeId nodeId{0};
-  if (!server_.hasArg("id") || !server_.hasArg("mode") ||
-      !parseNodeId(server_.arg("id"), nodeId)) {
-    sendApiResult(false, "valid node id and mode are required");
-    return;
-  }
-
-  node::NodeControlMode mode{};
-  if (server_.arg("mode") == "follow") {
-    mode = node::NodeControlMode::FollowMain;
-  } else if (server_.arg("mode") == "independent") {
-    mode = node::NodeControlMode::Independent;
-  } else {
-    sendApiResult(false, "mode must be follow or independent");
-    return;
-  }
-
-  if (!nodes_.requestNodeControlMode(nodeId, mode, millis())) {
-    sendApiResult(false, "selected node is unavailable or busy");
-    return;
-  }
-  String json = F("{\"ok\":true,\"pending\":true,\"mode\":\"");
-  json += mode == node::NodeControlMode::Independent ? F("independent")
-                                                      : F("follow");
-  json += F("\"}");
-  server_.send(202, "application/json; charset=utf-8", json);
 }
 
 void WebApi::handleSetNodeLighting() {
@@ -888,20 +482,22 @@ void WebApi::handleSetNodeLighting() {
     return;
   }
 
-  PersistedLightingState next{};
-  EffectMode requestedMode{};
+  const DesiredLightingState *desired = lighting_.desiredFor(nodeId);
+  const LightingScene fallback =
+      desired == nullptr ? LightingScene{} : desired->scene;
+  LightingScene next{};
   String error;
-  if (!parseLightingRequest(next, requestedMode, true, error)) {
+  if (!web::parseLightingRequest(server_, next, fallback, true, error)) {
     sendApiResult(false, error.c_str());
     return;
   }
-  if (!nodes_.requestIndependentScene(nodeId, next, millis())) {
-    sendApiResult(false, "node must be online and in independent mode");
+  if (!lighting_.applyDirect(nodeId, next, millis())) {
+    sendApiResult(false, "node lighting state was rejected");
     return;
   }
 
   String json = F("{\"ok\":true,\"pending\":true,\"effect\":\"");
-  json += lightingEffectId(requestedMode);
+  json += web::effectId(next.mode);
   json += F("\"}");
   server_.send(202, "application/json; charset=utf-8", json);
 }
@@ -910,8 +506,8 @@ void WebApi::handleGetScenes() {
   String json;
   json.reserve(12000U);
   json += F("{\"ok\":true,\"scenes\":[");
-  for (size_t index = 0U; index < scenes_.sceneCount(); ++index) {
-    const NamedLightingScene *scene = scenes_.sceneAt(index);
+  for (size_t index = 0U; index < lighting_.sceneCount(); ++index) {
+    const NamedLightingScene *scene = lighting_.sceneAt(index);
     if (scene == nullptr) continue;
     if (index != 0U) json += ',';
     json += F("{\"id\":");
@@ -932,8 +528,8 @@ void WebApi::handleGetScenes() {
     json += F("]}");
   }
   json += F("],\"desired\":[");
-  for (size_t index = 0U; index < scenes_.desiredCount(); ++index) {
-    const DesiredLightingState *desired = scenes_.desiredAt(index);
+  for (size_t index = 0U; index < lighting_.desiredCount(); ++index) {
+    const DesiredLightingState *desired = lighting_.desiredAt(index);
     if (desired == nullptr) continue;
     if (index != 0U) json += ',';
     json += F("{\"target\":\"");
@@ -966,10 +562,11 @@ void WebApi::handleSaveScene() {
     return;
   }
 
-  PersistedLightingState next{};
-  EffectMode requestedMode{};
+  const LightingScene fallback =
+      makeLightingScene(lighting_.snapshot().lighting);
+  LightingScene next{};
   String error;
-  if (!parseLightingRequest(next, requestedMode, false, error)) {
+  if (!web::parseLightingRequest(server_, next, fallback, false, error)) {
     sendApiResult(false, error.c_str());
     return;
   }
@@ -980,22 +577,8 @@ void WebApi::handleSaveScene() {
     sendApiResult(false, "sceneId must be a non-negative integer");
     return;
   }
-  if (sceneId == 0U) {
-    for (size_t index = 0U; index < scenes_.sceneCount(); ++index) {
-      const NamedLightingScene *stored = scenes_.sceneAt(index);
-      if (stored != nullptr && stored->id >= sceneId) sceneId = stored->id + 1U;
-    }
-    if (sceneId == 0U) sceneId = 1U;
-  }
-
-  NamedLightingScene definition{};
-  definition.id = sceneId;
-  if (!definition.setName(name.c_str())) {
-    sendApiResult(false, "scene name is invalid");
-    return;
-  }
-  const LightingScene lighting = makeLightingScene(next);
-  const NamedLightingScene *storedScene = scenes_.sceneById(sceneId);
+  LightingTargetId targetsBuffer[NamedLightingScene::kMaxAssignments]{};
+  size_t targetCount = 0U;
   String targets = server_.arg("targets");
   int start = 0;
   while (start <= targets.length()) {
@@ -1005,32 +588,22 @@ void WebApi::handleSaveScene() {
     value.trim();
     LightingTargetId targetId{0U};
     if (!parseLightingTargetId(value, targetId) ||
-        definition.assignmentCount >= NamedLightingScene::kMaxAssignments) {
+        targetCount >= NamedLightingScene::kMaxAssignments) {
       sendApiResult(false, "targets contains an invalid or excess node id");
       return;
     }
-    LightingScene targetLighting = lighting;
-    if (storedScene != nullptr) {
-      for (size_t existingIndex = 0U;
-           existingIndex < storedScene->assignmentCount; ++existingIndex) {
-        if (storedScene->assignments[existingIndex].targetId == targetId) {
-          targetLighting = storedScene->assignments[existingIndex].scene;
-          break;
-        }
-      }
-    }
-    definition.assignments[definition.assignmentCount++] = {targetId,
-                                                              targetLighting};
+    targetsBuffer[targetCount++] = targetId;
     if (separator < 0) break;
     start = separator + 1;
   }
-  if (!scenes_.saveScene(definition)) {
+  LightingSceneId savedId{0U};
+  if (!lighting_.upsertScene(sceneId, name.c_str(), targetsBuffer, targetCount,
+                             next, millis(), savedId)) {
     sendApiResult(false, "scene is invalid, duplicated, or capacity is full");
     return;
   }
-  sceneStore_.markDirty(millis());
   String json = F("{\"ok\":true,\"sceneId\":");
-  json += sceneId;
+  json += savedId;
   json += F("}");
   server_.send(200, "application/json; charset=utf-8", json);
 }
@@ -1044,36 +617,32 @@ void WebApi::handleSetSceneAssignment() {
     sendApiResult(false, "valid sceneId and light target id are required");
     return;
   }
-  const NamedLightingScene *stored = scenes_.sceneById(sceneId);
+  const NamedLightingScene *stored = lighting_.sceneById(sceneId);
   if (stored == nullptr) {
-    sendApiResult(false, "saved scene was not found");
-    return;
-  }
-  NamedLightingScene updated = *stored;
-  SceneAssignment *assignment = nullptr;
-  for (size_t index = 0U; index < updated.assignmentCount; ++index) {
-    if (updated.assignments[index].targetId == targetId) {
-      assignment = &updated.assignments[index];
-      break;
-    }
-  }
-  if (assignment == nullptr) {
     sendApiResult(false, "target is not a member of this scene");
     return;
   }
-  PersistedLightingState next{};
-  EffectMode requestedMode{};
+  const LightingScene *fallback = nullptr;
+  for (size_t index = 0U; index < stored->assignmentCount; ++index) {
+    if (stored->assignments[index].targetId == targetId) {
+      fallback = &stored->assignments[index].scene;
+      break;
+    }
+  }
+  if (fallback == nullptr) {
+    sendApiResult(false, "target is not a member of this scene");
+    return;
+  }
+  LightingScene next{};
   String error;
-  if (!parseLightingRequest(next, requestedMode, true, error)) {
+  if (!web::parseLightingRequest(server_, next, *fallback, true, error)) {
     sendApiResult(false, error.c_str());
     return;
   }
-  assignment->scene = makeLightingScene(next);
-  if (!scenes_.saveScene(updated)) {
+  if (!lighting_.updateSceneAssignment(sceneId, targetId, next, millis())) {
     sendApiResult(false, "scene assignment was rejected");
     return;
   }
-  sceneStore_.markDirty(millis());
   sendApiResult(true);
 }
 
@@ -1081,11 +650,10 @@ void WebApi::handleActivateScene() {
   LightingSceneId sceneId{0U};
   if (!server_.hasArg("sceneId") ||
       !parseSceneId(server_.arg("sceneId"), sceneId) ||
-      !scenes_.activateScene(sceneId)) {
+      !lighting_.activateScene(sceneId, millis())) {
     sendApiResult(false, "valid saved sceneId is required");
     return;
   }
-  sceneStore_.markDirty(millis());
   server_.send(202, "application/json; charset=utf-8",
                "{\"ok\":true,\"pending\":true}");
 }
@@ -1094,11 +662,10 @@ void WebApi::handleDeleteScene() {
   LightingSceneId sceneId{0U};
   if (!server_.hasArg("sceneId") ||
       !parseSceneId(server_.arg("sceneId"), sceneId) ||
-      !scenes_.eraseScene(sceneId)) {
+      !lighting_.eraseScene(sceneId, millis())) {
     sendApiResult(false, "valid saved sceneId is required");
     return;
   }
-  sceneStore_.markDirty(millis());
   sendApiResult(true);
 }
 
@@ -1109,20 +676,21 @@ void WebApi::handleSetTargetLighting() {
     sendApiResult(false, "valid light target id is required");
     return;
   }
-  PersistedLightingState next{};
-  EffectMode requestedMode{};
+  const DesiredLightingState *desired = lighting_.desiredFor(targetId);
+  const LightingScene fallback =
+      desired == nullptr ? LightingScene{} : desired->scene;
+  LightingScene next{};
   String error;
-  if (!parseLightingRequest(next, requestedMode, true, error)) {
+  if (!web::parseLightingRequest(server_, next, fallback, true, error)) {
     sendApiResult(false, error.c_str());
     return;
   }
-  if (!scenes_.applyDirect(targetId, makeLightingScene(next))) {
+  if (!lighting_.applyDirect(targetId, next, millis())) {
     sendApiResult(false, "light target state was rejected");
     return;
   }
-  sceneStore_.markDirty(millis());
   String json = F("{\"ok\":true,\"pending\":true,\"effect\":\"");
-  json += lightingEffectId(requestedMode);
+  json += web::effectId(next.mode);
   json += F("\"}");
   server_.send(202, "application/json; charset=utf-8", json);
 }
@@ -1295,153 +863,8 @@ void WebApi::handleSetNodeName() {
   server_.send(200, "application/json; charset=utf-8", json);
 }
 
-void WebApi::handleNodeFirmwareUploadData() {
-  HTTPUpload &upload = server_.upload();
-  if (upload.status == UPLOAD_FILE_START) {
-    nodeFirmwareUploadError_ = "";
-    nodeFirmwareUploadComplete_ = false;
-    nodeFirmwareReceived_ = 0U;
-    nodeFirmwareSize_ = 0U;
-    nodeFirmwareTarget_ = 0U;
-
-    const NodeFirmwareTransferState transferState =
-        nodes_.firmwareUpdateStatus().state;
-    if (transferState == NodeFirmwareTransferState::Starting ||
-        transferState == NodeFirmwareTransferState::Sending ||
-        transferState == NodeFirmwareTransferState::Finalizing ||
-        transferState == NodeFirmwareTransferState::Succeeded) {
-      nodeFirmwareUploadError_ = "another C3 firmware update is active";
-      return;
-    }
-    if (nodeFirmwareImage_ != nullptr) {
-      heap_caps_free(nodeFirmwareImage_);
-      nodeFirmwareImage_ = nullptr;
-    }
-    if (!server_.hasArg("id") ||
-        !parseNodeId(server_.arg("id"), nodeFirmwareTarget_)) {
-      nodeFirmwareUploadError_ = "valid target node id is required";
-      return;
-    }
-    const NodeRecord *record = nodes_.registry().find(nodeFirmwareTarget_);
-    if (record == nullptr ||
-        record->connectionState != NodeConnectionState::Ready ||
-        !record->capabilities.bound ||
-        (record->capabilities.capabilityBits &
-         node::capabilityMask(node::Capability::FirmwareUpdate)) == 0U) {
-      nodeFirmwareUploadError_ =
-          "target C3 must be online, bound, and OTA-capable";
-      return;
-    }
-    if (!psramFound()) {
-      nodeFirmwareUploadError_ = "S3 PSRAM is unavailable";
-      return;
-    }
-    nodeFirmwareImage_ = static_cast<uint8_t *>(heap_caps_malloc(
-        kMaxC3FirmwareBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (nodeFirmwareImage_ == nullptr) {
-      nodeFirmwareUploadError_ = "not enough S3 PSRAM for firmware image";
-    }
-    return;
-  }
-
-  if (upload.status == UPLOAD_FILE_WRITE) {
-    if (!nodeFirmwareUploadError_.isEmpty()) return;
-    if (nodeFirmwareImage_ == nullptr || upload.currentSize == 0U ||
-        nodeFirmwareReceived_ + upload.currentSize > kMaxC3FirmwareBytes) {
-      nodeFirmwareUploadError_ = "firmware image is too large";
-      return;
-    }
-    memcpy(nodeFirmwareImage_ + nodeFirmwareReceived_, upload.buf,
-           upload.currentSize);
-    nodeFirmwareReceived_ += upload.currentSize;
-    return;
-  }
-
-  if (upload.status == UPLOAD_FILE_END) {
-    if (!nodeFirmwareUploadError_.isEmpty()) return;
-    nodeFirmwareSize_ = nodeFirmwareReceived_;
-    if (!validC3FirmwareImage(nodeFirmwareImage_, nodeFirmwareSize_)) {
-      nodeFirmwareUploadError_ =
-          "file is not a valid ESP32-C3 application image";
-      return;
-    }
-    uint8_t sha256[32]{};
-    if (mbedtls_sha256_ret(nodeFirmwareImage_, nodeFirmwareSize_, sha256, 0) !=
-        0) {
-      nodeFirmwareUploadError_ = "failed to hash firmware image";
-      return;
-    }
-    if (!nodes_.requestNodeFirmwareUpdate(nodeFirmwareTarget_,
-                                          nodeFirmwareImage_,
-                                          nodeFirmwareSize_, sha256,
-                                          millis())) {
-      nodeFirmwareUploadError_ = "target C3 is unavailable or busy";
-      return;
-    }
-    nodeFirmwareUploadComplete_ = true;
-    return;
-  }
-
-  if (upload.status == UPLOAD_FILE_ABORTED) {
-    nodeFirmwareUploadError_ = "firmware upload was aborted";
-  }
-}
-
-void WebApi::handleNodeFirmwareUpload() {
-  if (!nodeFirmwareUploadError_.isEmpty() ||
-      !nodeFirmwareUploadComplete_) {
-    const String message = nodeFirmwareUploadError_.isEmpty()
-                               ? String("firmware upload did not complete")
-                               : nodeFirmwareUploadError_;
-    if (nodeFirmwareImage_ != nullptr && !nodeFirmwareUploadComplete_) {
-      heap_caps_free(nodeFirmwareImage_);
-      nodeFirmwareImage_ = nullptr;
-    }
-    sendApiResult(false, message.c_str());
-    return;
-  }
-  String json = F("{\"ok\":true,\"pending\":true,\"nodeId\":\"");
-  char nodeId[9]{};
-  snprintf(nodeId, sizeof(nodeId), "%08lx",
-           static_cast<unsigned long>(nodeFirmwareTarget_));
-  json += nodeId;
-  json += F("\",\"imageSize\":");
-  json += nodeFirmwareSize_;
-  json += '}';
-  server_.send(202, "application/json; charset=utf-8", json);
-}
-
-void WebApi::handleGetNodeFirmwareStatus() {
-  const NodeFirmwareTransferStatus status = nodes_.firmwareUpdateStatus();
-  char nodeId[9]{};
-  snprintf(nodeId, sizeof(nodeId), "%08lx",
-           static_cast<unsigned long>(status.nodeId));
-  const uint32_t progress =
-      status.imageSize == 0U
-          ? 0U
-          : static_cast<uint32_t>(
-                (static_cast<uint64_t>(status.confirmedBytes) * 100U) /
-                status.imageSize);
-  String json;
-  json.reserve(220);
-  json += F("{\"ok\":true,\"state\":\"");
-  json += firmwareTransferStateName(status.state);
-  json += F("\",\"nodeId\":\"");
-  json += nodeId;
-  json += F("\",\"imageSize\":");
-  json += status.imageSize;
-  json += F(",\"confirmedBytes\":");
-  json += status.confirmedBytes;
-  json += F(",\"progress\":");
-  json += progress;
-  json += F(",\"error\":\"");
-  json += firmwareErrorName(status.error);
-  json += F("\"}");
-  server_.send(200, "application/json; charset=utf-8", json);
-}
-
 void WebApi::handleApiStatus() {
-  const StateSnapshot snapshot = commands_.snapshot();
+  const LightingApplicationSnapshot snapshot = lighting_.snapshot();
   const PersistedLightingState &state = snapshot.lighting;
   const AudioSnapshot &audio = audio_.snapshot();
   const AudioTuning &tuning = audio_.tuning();
@@ -1483,7 +906,7 @@ void WebApi::handleApiStatus() {
   }
   json += '"';
   json += F(",\"mode\":\"");
-  json += modeName(state.mode);
+  json += web::modeName(state.mode);
   json += F("\",\"brightness\":");
   json += state.brightness;
   json += F(",\"ledCount\":");
@@ -1537,7 +960,7 @@ void WebApi::handleApiStatus() {
   json += F(",\"ip\":\"");
   json += network.ip;
   json += F("\",\"effect\":\"");
-  json += lightingEffectId(state.mode);
+  json += web::effectId(state.mode);
   json += F("\",\"settings\":");
   json += buildLightingSettingsJson();
   json += F(",\"layout\":");
@@ -1714,7 +1137,7 @@ void WebApi::handleSetMode() {
   if (requestedValue == "on") {
     turnOn = true;
     requestedMode = EffectMode::Static;
-  } else if (!parseMode(requestedValue, requestedMode)) {
+  } else if (!web::parseLegacyMode(requestedValue, requestedMode)) {
     sendApiResult(false, "Invalid mode");
     return;
   }
@@ -1745,7 +1168,7 @@ void WebApi::handleSetColor() {
   EffectMode retainedMode = EffectMode::Static;
   if (server_.hasArg("keepMode")) {
     EffectMode parsedMode;
-    if (parseMode(server_.arg("keepMode"), parsedMode) &&
+    if (web::parseLegacyMode(server_.arg("keepMode"), parsedMode) &&
         parsedMode != EffectMode::Off && parsedMode != EffectMode::Rainbow)
       retainedMode = parsedMode;
   }
@@ -1795,7 +1218,7 @@ void WebApi::handleSetEffects() {
 }
 
 void WebApi::handleSetStartup() {
-  PersistedLightingState next = commands_.snapshot().lighting;
+  PersistedLightingState next = lighting_.snapshot().lighting;
   if (server_.hasArg("r"))
     next.startupColor.red =
         static_cast<uint8_t>(constrain(server_.arg("r").toInt(), 0, 255));
@@ -1849,7 +1272,7 @@ void WebApi::handleSetAudio() {
     tuning.beatBoost =
         constrain(server_.arg("beatBoost").toFloat(), 20.0F, 255.0F);
   audio_.setTuning(tuning);
-  commands_.setAudioTuning(tuning);
+  lighting_.setAudioTuning(tuning, millis());
   sendApiResult(true);
 }
 

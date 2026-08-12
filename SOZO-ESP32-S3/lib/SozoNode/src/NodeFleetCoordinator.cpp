@@ -29,15 +29,14 @@ bool NodeFleetCoordinator::begin() {
   return true;
 }
 
-void NodeFleetCoordinator::tick(
-    const uint32_t nowMs, const SpaceSceneSnapshot &scene,
-    const AudioFrame &audioFrame) {
+void NodeFleetCoordinator::tick(const uint32_t nowMs,
+                                const AudioFrame &audioFrame) {
   transport_.tick(nowMs);
   const bool pairingAllowed = transport_.pairingWindowOpen(nowMs);
   for (size_t index = 0; index < sessionCount_; ++index) {
     if (sessions_[index] != nullptr) {
       sessions_[index]->setBindingAllowed(pairingAllowed);
-      sessions_[index]->tick(nowMs, scene, audioFrame);
+      sessions_[index]->tick(nowMs, audioFrame);
       const NodeTransport *link = transport_.linkAt(index);
       if (link != nullptr && link->ready() && !link->capabilities().bound &&
           !pairingAllowed && sessions_[index]->activeNodeId() != 0U) {
@@ -130,14 +129,6 @@ bool NodeFleetCoordinator::requestNodeControlMode(
   NodeCoordinator *session = sessionFor(nodeId);
   return session != nullptr &&
          session->requestNodeControlMode(nodeId, mode, nowMs);
-}
-
-bool NodeFleetCoordinator::requestIndependentScene(
-    const node::NodeId nodeId, const PersistedLightingState &state,
-    const uint32_t nowMs) {
-  NodeCoordinator *session = sessionFor(nodeId);
-  return session != nullptr &&
-         session->requestIndependentScene(nodeId, state, nowMs);
 }
 
 bool NodeFleetCoordinator::requestDesiredScene(

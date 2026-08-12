@@ -6,6 +6,14 @@ const source = readFileSync(
   new URL('../lib/SozoWeb/src/WebApi.cpp', import.meta.url),
   'utf8',
 );
+const firmwareWebSource = readFileSync(
+  new URL('../lib/SozoWeb/src/NodeFirmwareWebController.cpp', import.meta.url),
+  'utf8',
+);
+const lightingCodecSource = readFileSync(
+  new URL('../lib/SozoWeb/src/LightingHttpCodec.cpp', import.meta.url),
+  'utf8',
+);
 const nodeNameStoreSource = readFileSync(
   new URL('../lib/SozoSettings/src/NodeNameStore.cpp', import.meta.url),
   'utf8',
@@ -29,13 +37,13 @@ test('/api/nodes keeps its existing fields and exposes BLE worker diagnostics', 
   }
 });
 
-test('retains legacy device endpoints while scenes use desired per-target state', () => {
-  assert.match(source, /"\/api\/node\/mode"/);
+test('uses one application path for direct and scene lighting commands', () => {
+  assert.doesNotMatch(source, /"\/api\/node\/mode"/);
   assert.match(source, /"\/api\/node\/lighting"/);
-  assert.match(source, /handleSetNodeMode/);
   assert.match(source, /handleSetNodeLighting/);
-  assert.match(source, /requestNodeControlMode/);
-  assert.match(source, /requestIndependentScene/);
+  assert.match(source, /"\/api\/target\/lighting"/);
+  assert.match(source, /lighting_\.applyDirect/);
+  assert.doesNotMatch(source, /requestIndependentScene|handleSetNodeMode/);
 });
 
 test('provides named scenes with independently editable node assignments', () => {
@@ -86,7 +94,7 @@ test('persists editable local and wireless light-node names on the Hub', () => {
   assert.match(source, /escapeJson\(nodeNames_\./);
   assert.doesNotMatch(
     source.slice(source.indexOf('void WebApi::handleSetNodeName'),
-      source.indexOf('void WebApi::handleNodeFirmwareUploadData')),
+      source.indexOf('void WebApi::handleApiStatus')),
     /requestNode|lastReceiptMs/,
     'Hub-local names must not wait for a BLE command receipt',
   );
@@ -121,10 +129,10 @@ test('/api/nodes exposes fleet capacity and an explicit pairing window', () => {
 });
 
 test('independent scene request applies the selected effect to the scene state', () => {
-  const start = source.indexOf('bool WebApi::parseLightingRequest');
-  const end = source.indexOf('void WebApi::handleSetLighting', start);
+  const start = lightingCodecSource.indexOf('bool parseLightingRequest');
+  const end = lightingCodecSource.indexOf('\n}', start);
   assert.ok(start >= 0 && end > start, 'lighting request parser was not found');
-  const parser = source.slice(start, end);
+  const parser = lightingCodecSource.slice(start);
   assert.match(
     parser,
     /next\.mode\s*=\s*requestedMode\s*;/,
@@ -145,12 +153,15 @@ test('provides full device-scoped geometry while retaining LED-count compatibili
 });
 
 test('provides one encrypted BLE firmware workflow for OTA-capable C3 nodes', () => {
-  assert.match(source, /"\/api\/node\/firmware"/);
-  assert.match(source, /handleNodeFirmwareUploadData/);
-  assert.match(source, /handleGetNodeFirmwareStatus/);
-  assert.match(source, /requestNodeFirmwareUpdate/);
+  assert.match(firmwareWebSource, /"\/api\/node\/firmware"/);
+  assert.match(firmwareWebSource, /handleUploadData/);
+  assert.match(firmwareWebSource, /handleStatus/);
+  assert.match(firmwareWebSource, /requestNodeFirmwareUpdate/);
   for (const field of ['otaCapable', 'firmware', 'confirmedBytes', 'progress']) {
-    assert.match(source, new RegExp(`\\\\"${field}\\\\"`),
+    const owner = field === 'otaCapable' || field === 'firmware'
+      ? source
+      : firmwareWebSource;
+    assert.match(owner, new RegExp(`\\\\"${field}\\\\"`),
       `missing firmware field: ${field}`);
   }
 });

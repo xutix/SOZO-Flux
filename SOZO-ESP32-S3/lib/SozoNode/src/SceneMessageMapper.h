@@ -1,6 +1,6 @@
 #pragma once
 
-#include <SpaceSceneCoordinator.h>
+#include <LightingScene.h>
 #include <SozoNodeMessages.h>
 
 namespace sozo {

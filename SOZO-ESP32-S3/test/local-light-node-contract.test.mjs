@@ -13,7 +13,8 @@ test('S3 local strip is an optional independently addressed lighting target', as
   assert.match(main, /runtime_\.applyScene\(/);
   assert.match(main, /LightSceneTarget::Independent/);
   assert.match(main, /SceneDeliveryCoordinator sceneDelivery/);
-  assert.match(main, /nodeCoordinator\.tick\(now, scene, audio\)/);
+  assert.match(main, /nodeCoordinator\.tick\(now, audio\)/);
+  assert.doesNotMatch(main, /SpaceSceneCoordinator|SpaceSceneSnapshot/);
   assert.match(main, /sceneDelivery\.tick\(now\)/);
   assert.doesNotMatch(main, /CommandRouter commandRouter\(lightingController/);
 });

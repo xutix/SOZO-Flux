@@ -452,7 +452,7 @@ void test_independent_scene_state_survives_a_runtime_restart() {
                                    sozo::c3::SceneTarget::Independent));
 
   const sozo::c3::NodeControlState persisted = firstRuntime.controlState();
-  CHECK_EQ(sozo::node::NodeControlMode::Independent, persisted.controlMode);
+  CHECK_EQ(sozo::LightControlMode::Independent, persisted.controlMode);
   CHECK_TRUE(persisted.hasIndependentScene);
   CHECK_EQ(73U, persisted.independentState.primaryColor.red);
 
@@ -771,7 +771,7 @@ void test_failed_control_mode_persistence_restores_follow_output() {
   FakeDiagnostics diagnostics;
   FakeBindingRepository bindings;
   FakeNodeControlRepository controls;
-  controls.state.controlMode = sozo::node::NodeControlMode::FollowMain;
+  controls.state.controlMode = sozo::LightControlMode::FollowScene;
   controls.state.hasIndependentScene = true;
   controls.state.independentState = sozo::makeDefaultPersistedLightingState();
   controls.state.independentState.primaryColor = {88U, 77U, 66U};
